@@ -8,15 +8,29 @@ async function sendMessage() {
     chatLog.innerHTML += `<p><strong>Jij:</strong> ${userMessage}</p>`;
     inputField.value = "";
 
-    const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ message: userMessage })
-    });
+    try {
+        const response = await fetch("/api/chat", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ message: userMessage })
+        });
 
-    const data = await response.json();
-    chatLog.innerHTML += `<p><strong>Joop Jurist:</strong> ${data.reply}</p>`;
-    chatLog.scrollTop = chatLog.scrollHeight;
+        if (!response.ok) {
+            throw new Error(`Serverfout: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (!data.reply) {
+            throw new Error("Geen antwoord ontvangen van de chatbot.");
+        }
+
+        chatLog.innerHTML += `<p><strong>Joop Jurist:</strong> ${data.reply}</p>`;
+        chatLog.scrollTop = chatLog.scrollHeight;
+    } catch (error) {
+        console.error("Fout bij verzenden van bericht:", error);
+        chatLog.innerHTML += `<p><strong>Joop Jurist:</strong> Er is iets misgegaan. Probeer het opnieuw.</p>`;
+    }
 }
