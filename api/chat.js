@@ -8,14 +8,14 @@ export default async function handler(req, res) {
   try {
     const { message } = req.body;
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'gpt-4',
+        model: 'gpt-3.5-turbo',
         messages: [
           {
             role: 'system',
@@ -29,11 +29,16 @@ export default async function handler(req, res) {
       })
     });
 
-    const data = await response.json();
-    res.status(200).json({
-  message: data.choices?.[0]?.message?.content || "Sorry, er ging iets mis met het antwoord."
-});
+    const data = await openaiRes.json();
+    console.log("✅ OpenAI response:", data);
+
+    if (!data.choices || !data.choices[0]) {
+      return res.status(500).json({ error: 'Geen geldige reactie van OpenAI', details: data });
+    }
+
+    res.status(200).json(data);
   } catch (error) {
+    console.error("❌ Fout in backend:", error);
     res.status(500).json({ error: 'Interne fout', details: error.message });
   }
 }
