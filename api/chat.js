@@ -8,6 +8,10 @@ export default async function handler(req, res) {
   try {
     const { message } = req.body;
 
+    if (!message) {
+      return res.status(400).json({ error: "Geen bericht ontvangen in de request body" });
+    }
+
     const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -30,15 +34,16 @@ export default async function handler(req, res) {
     });
 
     const data = await openaiRes.json();
-    console.log("✅ OpenAI response:", data);
 
+    // Als OpenAI een fout terugstuurt, log die dan
     if (!data.choices || !data.choices[0]) {
-      return res.status(500).json({ error: 'Geen geldige reactie van OpenAI', details: data });
+      console.error("❌ OpenAI antwoord ongeldig:", data);
+      return res.status(500).json({ error: "OpenAI gaf geen geldig antwoord terug", data });
     }
 
     res.status(200).json(data);
   } catch (error) {
-    console.error("❌ Fout in backend:", error);
-    res.status(500).json({ error: 'Interne fout', details: error.message });
+    console.error("❌ Server fout:", error);
+    res.status(500).json({ error: "Interne serverfout", details: error.message });
   }
 }
