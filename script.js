@@ -16,7 +16,7 @@ async function sendMessage() {
   });
 
   const data = await response.json();
-  const aiMessage = data.choices[0].message.content;
+  const aiMessage = data.message;
   chatLog.innerHTML += `<p><strong>Joop Jurist:</strong> ${aiMessage}</p>`;
   chatLog.scrollTop = chatLog.scrollHeight;
 }
