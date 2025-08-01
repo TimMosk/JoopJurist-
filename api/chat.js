@@ -1,28 +1,37 @@
-const { OpenAI } = require("openai");
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
-
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ message: 'Alleen POST-requests zijn toegestaan.' });
   }
 
-  const userMessage = req.body.message;
-
   try {
-    const chatCompletion = await openai.chat.completions.create({
-      model: "gpt-4",
-      messages: [
-        { role: "system", content: "Je bent een juridische chatbot die gebruikers helpt gestructureerde informatie te geven om juridische documenten op te stellen. Stel gerichte vragen en bouw een profiel op." },
-        { role: "user", content: userMessage }
-      ]
+    const { message } = req.body;
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4',
+        messages: [
+          {
+            role: 'system',
+            content: 'Je bent een juridische chatbot die gebruikers helpt bij het opstellen van juridische documenten door gestructureerde informatie te verzamelen.'
+          },
+          {
+            role: 'user',
+            content: message
+          }
+        ]
+      })
     });
 
-    const reply = chatCompletion.choices[0].message.content;
-    res.status(200).json({ reply });
+    const data = await response.json();
+    res.status(200).json(data);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Interne fout', details: error.message });
   }
 }
