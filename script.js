@@ -59,4 +59,15 @@ async function sendMessage() {
     `;
     console.error("Fout:", error);
   }
+  document.getElementById("user-input").addEventListener("keydown", function (event) {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    sendMessage();
+  }
+})
+
+// Cursor automatisch in invoerveld plaatsen bij laden
+window.addEventListener("load", function () {
+  document.getElementById("user-input").focus();
+});
 }
