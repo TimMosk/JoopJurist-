@@ -70,3 +70,42 @@ button:hover {
     width: 100%;
   }
 }
+.message {
+  display: flex;
+  margin-bottom: 10px;
+  max-width: 100%;
+}
+
+.message.user {
+  justify-content: flex-end;
+}
+
+.message.ai {
+  justify-content: flex-start;
+}
+
+.bubble {
+  padding: 0.75rem 1rem;
+  border-radius: 1.2rem;
+  max-width: 80%;
+  word-wrap: break-word;
+  background-color: #e1f5fe;
+  color: #000;
+}
+
+.message.user .bubble {
+  background-color: #0070f3;
+  color: white;
+  border-bottom-right-radius: 0;
+}
+
+.message.ai .bubble {
+  background-color: #eee;
+  color: #333;
+  border-bottom-left-radius: 0;
+}
+
+.bubble.error {
+  background-color: #ffe5e5;
+  color: #900;
+}
