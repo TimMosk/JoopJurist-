@@ -124,8 +124,12 @@ button:hover {
   100% { content: '...'; }
 }
 
-.dots::after {
+.dots {
   display: inline-block;
+  min-width: 1em;
+}
+
+.dots::after {
   content: '';
   animation: blinkDots 1s infinite steps(3, end);
 }
