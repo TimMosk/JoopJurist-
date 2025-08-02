@@ -10,17 +10,17 @@ async function sendMessage() {
     </div>
   `;
   inputField.value = "";
-  
+
   const typingIndicator = document.createElement("div");
   typingIndicator.classList.add("message", "ai");
   typingIndicator.id = "typing-indicator";
   typingIndicator.innerHTML = `
-  <div class="bubble typing">
-    ⚖️ Joop zit in de bieb<span class="dots"></span>
-  </div>`;
+    <div class="bubble typing">
+      ⚖️ Joop zit in de bieb<span class="dots"></span>
+    </div>`;
   chatLog.appendChild(typingIndicator);
   chatLog.scrollTop = chatLog.scrollHeight;
-  
+
   try {
     const response = await fetch("/api/chat", {
       method: "POST",
@@ -31,9 +31,8 @@ async function sendMessage() {
     });
 
     const data = await response.json();
-
     typingIndicator.remove();
-    
+
     if (!response.ok || !data.choices || !data.choices[0]) {
       chatLog.innerHTML += `
         <div class="message ai">
@@ -61,6 +60,7 @@ async function sendMessage() {
   }
 }
 
+// ✅ Enter verstuurt het bericht
 document.getElementById("user-input").addEventListener("keydown", function (event) {
   if (event.key === "Enter") {
     event.preventDefault();
@@ -68,7 +68,7 @@ document.getElementById("user-input").addEventListener("keydown", function (even
   }
 });
 
-// Cursor automatisch in invoerveld plaatsen bij laden
+// ✅ Cursor automatisch in invoerveld bij laden
 window.addEventListener("load", function () {
   document.getElementById("user-input").focus();
 });
