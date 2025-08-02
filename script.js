@@ -4,7 +4,11 @@ async function sendMessage() {
   const userMessage = inputField.value;
   if (!userMessage) return;
 
-  chatLog.innerHTML += `<p><strong>Jij:</strong> ${userMessage}</p>`;
+  chatLog.innerHTML += `
+  <div class="message user">
+    <div class="bubble">💬 ${userMessage}</div>
+  </div>
+`;
   inputField.value = "";
 
   try {
@@ -27,7 +31,11 @@ async function sendMessage() {
     chatLog.innerHTML += `<p><strong>Joop Jurist:</strong> ${aiMessage}</p>`;
     chatLog.scrollTop = chatLog.scrollHeight;
   } catch (error) {
-    chatLog.innerHTML += `<p><strong>Joop Jurist:</strong> Er is een netwerkfout opgetreden.</p>`;
+   chatLog.innerHTML += `
+  <div class="message ai">
+    <div class="bubble">⚖️ ${aiMessage}</div>
+  </div>
+`;
     console.error("Fout:", error);
   }
 }
