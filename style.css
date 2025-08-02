@@ -2,6 +2,10 @@ body {
   font-family: 'Work Sans', sans-serif;
 }
 
+input, button {
+  font-family: 'Work Sans', sans-serif;
+}
+
 /* Algemene reset */
 * {
   box-sizing: border-box;
