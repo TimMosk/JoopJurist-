@@ -59,7 +59,9 @@ async function sendMessage() {
     `;
     console.error("Fout:", error);
   }
-  document.getElementById("user-input").addEventListener("keydown", function (event) {
+}
+
+document.getElementById("user-input").addEventListener("keydown", function (event) {
   if (event.key === "Enter") {
     event.preventDefault();
     sendMessage();
