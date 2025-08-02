@@ -1,17 +1,21 @@
 <!DOCTYPE html>
 <html lang="nl">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Joop Jurist</title>
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="chat-container">
-    <h1>Welkom bij Joop Jurist</h1>
+  <div class="container">
+    <h1>Joop Jurist</h1>
     <div id="chat-log" class="chat-log"></div>
-    <input id="user-input" type="text" placeholder="Stel je vraag..." />
-    <button onclick="sendMessage()">Verstuur</button>
+    <div class="input-container">
+      <input type="text" id="user-input" placeholder="Typ hier je vraag..." />
+      <button onclick="sendMessage()">Verstuur</button>
+    </div>
   </div>
-  <script src="/script.js"></script>
+
+  <script src="script.js"></script>
 </body>
 </html>
