@@ -59,15 +59,19 @@ async function sendMessage() {
     console.error("Fout:", error);
   }
 
-// ✅ Enter verstuurt het bericht
-document.getElementById("user-input").addEventListener("keydown", function (event) {
-  if (event.key === "Enter") {
-    event.preventDefault();
-    sendMessage();
-  }
-});
+// Alles pas uitvoeren als de HTML volledig is geladen
+window.addEventListener("DOMContentLoaded", function () {
+  const input = document.getElementById("user-input");
+  const chatLog = document.getElementById("chat-log");
 
-// ✅ Cursor automatisch in invoerveld bij laden
-window.addEventListener("load", function () {
-  document.getElementById("user-input").focus();
+  // ENTER verzendt het bericht
+  input.addEventListener("keydown", function (event) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      sendMessage();
+    }
+  });
+
+  // Cursor direct actief maken
+  input.focus();
 });
