@@ -9,8 +9,15 @@ async function sendMessage() {
       <div class="bubble">💬 ${userMessage}</div>
     </div>
   `;
+  
   inputField.value = "";
-
+const typingIndicator = document.createElement("div");
+  typingIndicator.classList.add("message", "ai");
+  typingIndicator.id = "typing-indicator";
+  typingIndicator.innerHTML = `<div class="bubble typing">⚖️ Joop zit in de bieb...</div>`;
+  chatLog.appendChild(typingIndicator);
+  chatLog.scrollTop = chatLog.scrollHeight;
+  
   try {
     const response = await fetch("/api/chat", {
       method: "POST",
@@ -22,6 +29,8 @@ async function sendMessage() {
 
     const data = await response.json();
 
+    typingIndicator.remove();
+    
     if (!response.ok || !data.choices || !data.choices[0]) {
       chatLog.innerHTML += `
         <div class="message ai">
