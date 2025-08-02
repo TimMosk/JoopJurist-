@@ -109,3 +109,10 @@ button:hover {
   background-color: #ffe5e5;
   color: #900;
 }
+
+.bubble.typing {
+  font-style: italic;
+  color: #555;
+  background-color: #f0f0f0;
+  border-left: 4px solid #ccc;
+}
