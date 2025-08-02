@@ -9,9 +9,9 @@ async function sendMessage() {
       <div class="bubble">💬 ${userMessage}</div>
     </div>
   `;
-  
   inputField.value = "";
-const typingIndicator = document.createElement("div");
+  
+  const typingIndicator = document.createElement("div");
   typingIndicator.classList.add("message", "ai");
   typingIndicator.id = "typing-indicator";
   typingIndicator.innerHTML = `<div class="bubble typing">⚖️ Joop zit in de bieb...</div>`;
@@ -48,6 +48,7 @@ const typingIndicator = document.createElement("div");
     `;
     chatLog.scrollTop = chatLog.scrollHeight;
   } catch (error) {
+    typingIndicator.remove();
     chatLog.innerHTML += `
       <div class="message ai">
         <div class="bubble error">⚠️ Netwerkfout</div>
