@@ -1,8 +1,4 @@
-body {
-  font-family: 'Work Sans', sans-serif;
-}
-
-input, button {
+body, input, button, h1 {
   font-family: 'Work Sans', sans-serif;
 }
 
