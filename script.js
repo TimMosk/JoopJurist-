@@ -58,7 +58,6 @@ async function sendMessage() {
     `;
     console.error("Fout:", error);
   }
-}
 
 // ✅ Enter verstuurt het bericht
 document.getElementById("user-input").addEventListener("keydown", function (event) {
