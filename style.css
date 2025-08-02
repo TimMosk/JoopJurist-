@@ -1,57 +1,72 @@
-
-body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background-color: #f0f2f5;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    justify-content: center;
-    align-items: flex-start;
-    min-height: 100vh;
+/* Algemene reset */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
-.chat-container {
-    width: 100%;
-    max-width: 600px;
-    background: white;
-    margin-top: 50px;
-    padding: 20px;
-    border-radius: 12px;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+/* Container schaalt mooi mee */
+.container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 1rem;
+  font-family: sans-serif;
 }
 
+/* Titel */
 h1 {
-    text-align: center;
-    color: #333;
+  text-align: center;
+  margin-bottom: 1rem;
 }
 
+/* Chatbox */
 .chat-log {
-    height: 300px;
-    overflow-y: auto;
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    padding: 10px;
-    margin-bottom: 15px;
-    background: #fafafa;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  padding: 1rem;
+  height: 60vh;
+  overflow-y: auto;
+  background-color: #f9f9f9;
+  margin-bottom: 1rem;
 }
 
-input[type="text"] {
-    width: 75%;
-    padding: 10px;
-    border: 1px solid #ccc;
-    border-radius: 6px;
-    margin-right: 10px;
+/* Input en knop op één regel bij brede schermen */
+.input-container {
+  display: flex;
+  gap: 0.5rem;
 }
 
+/* Invoerveld */
+#user-input {
+  flex: 1;
+  padding: 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #aaa;
+  font-size: 1rem;
+}
+
+/* Verstuurknop */
 button {
-    padding: 10px 15px;
-    background-color: #0070f3;
-    color: white;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
+  padding: 0.75rem 1.2rem;
+  border: none;
+  border-radius: 6px;
+  background-color: #0070f3;
+  color: white;
+  font-size: 1rem;
+  cursor: pointer;
 }
 
 button:hover {
-    background-color: #005bb5;
+  background-color: #005ac1;
+}
+
+/* 📱 Responsieve layout */
+@media (max-width: 600px) {
+  .input-container {
+    flex-direction: column;
+  }
+
+  button {
+    width: 100%;
+  }
 }
