@@ -16,7 +16,7 @@ async function sendMessage() {
   typingIndicator.id = "typing-indicator";
   typingIndicator.innerHTML = `
   <div class="bubble typing">
-    ⚖️ Joop Jurist is aan het typen<span class="dots"></span>
+    ⚖️ Joop zit in de bieb<span class="dots"></span>
   </div>`;
   chatLog.appendChild(typingIndicator);
   chatLog.scrollTop = chatLog.scrollHeight;
