@@ -19,6 +19,8 @@ const textLabels = {
 };
 async function sendMessage() {
   const inputField = document.getElementById("user-input");
+  const sendButton = document.querySelector("button");
+  const originalText = textLabels[language].send;
   const chatLog = document.getElementById("chat-log");
   const userMessage = inputField.value;
   if (!userMessage) return;
