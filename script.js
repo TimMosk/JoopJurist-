@@ -30,7 +30,12 @@ async function sendMessage() {
       <div class="bubble">💬 ${userMessage}</div>
     </div>
   `;
+  scrollToBottom();
   inputField.value = "";
+  inputField.disabled = true;
+
+  sendButton.disabled = true;
+  sendButton.innerHTML = `<span class="spinner"></span> ${textLabels[language].sending}`;
 
   const typingIndicator = document.createElement("div");
   typingIndicator.classList.add("message", "ai");
