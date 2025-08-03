@@ -41,7 +41,10 @@ async function sendMessage() {
     </div>`;
   chatLog.appendChild(typingIndicator);
   scrollToBottom();
-
+  
+  sendButton.disabled = true;
+  sendButton.innerHTML = `<span class="spinner"></span> ${textLabels[language].sending}`;
+  
   try {
     const response = await fetch("/api/chat", {
       method: "POST",
