@@ -97,6 +97,8 @@ window.addEventListener("DOMContentLoaded", function () {
   const input = document.getElementById("user-input");
   const chatLog = document.getElementById("chat-log");
 
+  input.placeholder = textLabels[language].placeholder; 
+  
   // ENTER verzendt het bericht
   input.addEventListener("keydown", function (event) {
     if (event.key === "Enter") {
