@@ -70,6 +70,7 @@ window.addEventListener("DOMContentLoaded", function () {
       event.preventDefault();
       sendMessage();
     }
+  });
 
   // Cursor direct actief maken
   input.focus();
