@@ -58,6 +58,9 @@ async function sendMessage() {
     typingIndicator.remove();
 
     if (!response.ok || !data.choices || !data.choices[0]) {
+      sendButton.disabled = false;
+      sendButton.textContent = originalText;
+
       chatLog.innerHTML += `
         <div class="message ai">
           <div class="bubble error">⚠️ Er ging iets mis: ${data.error || "Geen geldig antwoord"}</div>
