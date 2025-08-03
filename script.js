@@ -19,7 +19,7 @@ async function sendMessage() {
       ⚖️ Joop zit in de bieb<span class="dots"></span>
     </div>`;
   chatLog.appendChild(typingIndicator);
-  chatLog.scrollTop = chatLog.scrollHeight;
+  scrollToBottom();
 
   try {
     const response = await fetch("/api/chat", {
@@ -48,7 +48,7 @@ async function sendMessage() {
         <div class="bubble">⚖️ ${aiMessage}</div>
       </div>
     `;
-    chatLog.scrollTop = chatLog.scrollHeight;
+    scrollToBottom();
   } catch (error) {
     typingIndicator.remove();
     chatLog.innerHTML += `
@@ -59,6 +59,12 @@ async function sendMessage() {
     console.error("Fout:", error);
   }
 }
+
+function scrollToBottom() {
+  const chatLog = document.getElementById("chat-log");
+  scrollToBottom();
+}
+
 // Alles pas uitvoeren als de HTML volledig is geladen
 window.addEventListener("DOMContentLoaded", function () {
   const input = document.getElementById("user-input");
