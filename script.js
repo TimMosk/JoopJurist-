@@ -1,3 +1,22 @@
+const language = "nl";
+
+// 🏷️ Labels per taal
+const textLabels = {
+  nl: {
+    send: "Verstuur",
+    sending: "Bezig...",
+    placeholder: "Typ hier je vraag...",
+    error: "Er ging iets mis",
+    network: "Netwerkfout"
+  },
+  en: {
+    send: "Send",
+    sending: "Sending...",
+    placeholder: "Type your question here...",
+    error: "Something went wrong",
+    network: "Network error"
+  }
+};
 async function sendMessage() {
   const inputField = document.getElementById("user-input");
   const chatLog = document.getElementById("chat-log");
