@@ -79,30 +79,32 @@ async function sendMessage() {
       <div class="message ai">
         <div class="bubble">⚖️ ${aiMessage}</div>
       </div>
-    `;
+      `;
     scrollToBottom();
   } catch (error) {
     typingIndicator.remove();
     chatLog.innerHTML += `
       <div class="message ai">
-        <div class="bubble error">⚠️ Netwerkfout</div>
-      </div>
+        <div class="bubble error">${textLabels[language].error}</div>
+     </div>
     `;
     console.error("Fout:", error);
+    scrollToBottom();
+  } finally {
+    sendButton.disabled = false;
+    sendButton.textContent = textLabels[language].send;
+    inputField.disabled = false;
+    inputField.focus();
   }
-}
-
-function scrollToBottom() {
-  const chatLog = document.getElementById("chat-log");
-  chatLog.scrollTop = chatLog.scrollHeight;
 }
 
 // Alles pas uitvoeren als de HTML volledig is geladen
 window.addEventListener("DOMContentLoaded", function () {
   const input = document.getElementById("user-input");
-  const chatLog = document.getElementById("chat-log");
+  const sendButton = document.querySelector("button");
 
   input.placeholder = textLabels[language].placeholder; 
+  sendButton.textContent = textLabels[language].send;
   
   // ENTER verzendt het bericht
   input.addEventListener("keydown", function (event) {
