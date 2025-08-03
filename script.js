@@ -59,10 +59,15 @@ async function sendMessage() {
       body: JSON.stringify({ message: userMessage })
     });
 
-    const data = await response.json();
-    typingIndicator.remove();
+   if (!response.ok) {
+  typingIndicator.remove();
+  throw new Error(`Server returned ${response.status}`);
+}
 
-    if (!response.ok || !data.choices || !data.choices[0]) {
+const data = await response.json();
+typingIndicator.remove();
+
+if (!data.choices || !data.choices[0]) {
       sendButton.disabled = false;
       sendButton.textContent = originalText;
 
