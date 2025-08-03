@@ -58,7 +58,7 @@ async function sendMessage() {
     `;
     console.error("Fout:", error);
   }
-
+}
 // Alles pas uitvoeren als de HTML volledig is geladen
 window.addEventListener("DOMContentLoaded", function () {
   const input = document.getElementById("user-input");
