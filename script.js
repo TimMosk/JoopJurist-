@@ -89,7 +89,7 @@ async function sendMessage() {
 
 function scrollToBottom() {
   const chatLog = document.getElementById("chat-log");
-  scrollToBottom();
+  chatLog.scrollTop = chatLog.scrollHeight;
 }
 
 // Alles pas uitvoeren als de HTML volledig is geladen
