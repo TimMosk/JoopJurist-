@@ -6,25 +6,35 @@ const textLabels = {
     send: "Verstuur",
     sending: "Bezig...",
     placeholder: "Typ hier je vraag...",
-    error: "Er ging iets mis",
-    network: "Netwerkfout"
+    error: "⚠️ Er ging iets mis",
+    network: "⚠️ Netwerkfout",
+    typing: "⚖️ Joop zit in de bieb"
   },
   en: {
     send: "Send",
     sending: "Sending...",
     placeholder: "Type your question here...",
-    error: "Something went wrong",
-    network: "Network error"
+    error: "⚠️ Something went wrong",
+    network: "⚠️ Network error",
+    typing: "⚖️ Joop is thinking"
   }
 };
+
+// ✅ Correcte scrollfunctie
+function scrollToBottom() {
+  const chatLog = document.getElementById("chat-log");
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
 async function sendMessage() {
   const inputField = document.getElementById("user-input");
   const sendButton = document.querySelector("button");
-  const originalText = textLabels[language].send;
   const chatLog = document.getElementById("chat-log");
-  const userMessage = inputField.value;
+  const originalText = textLabels[language].send;
+  const userMessage = inputField.value.trim();
   if (!userMessage) return;
 
+  // Voeg gebruikersbericht toe
   chatLog.innerHTML += `
     <div class="message user">
       <div class="bubble">💬 ${userMessage}</div>
@@ -33,23 +43,20 @@ async function sendMessage() {
   scrollToBottom();
   inputField.value = "";
   inputField.disabled = true;
-
   sendButton.disabled = true;
   sendButton.innerHTML = `<span class="spinner"></span> ${textLabels[language].sending}`;
 
+  // Typ-indicator
   const typingIndicator = document.createElement("div");
   typingIndicator.classList.add("message", "ai");
   typingIndicator.id = "typing-indicator";
   typingIndicator.innerHTML = `
     <div class="bubble typing">
-      ⚖️ Joop zit in de bieb<span class="dots"></span>
+      ${textLabels[language].typing}<span class="dots"></span>
     </div>`;
   chatLog.appendChild(typingIndicator);
   scrollToBottom();
-  
-  sendButton.disabled = true;
-  sendButton.innerHTML = `<span class="spinner"></span> ${textLabels[language].sending}`;
-  
+
   try {
     const response = await fetch("/api/chat", {
       method: "POST",
@@ -59,23 +66,22 @@ async function sendMessage() {
       body: JSON.stringify({ message: userMessage })
     });
 
-   if (!response.ok) {
-  typingIndicator.remove();
-  throw new Error(`Server returned ${response.status}`);
-}
+    // ✅ Check op netwerk- of serverfouten vóór .json()
+    if (!response.ok) {
+      typingIndicator.remove();
+      throw new Error(`Server returned ${response.status}`);
+    }
 
-const data = await response.json();
-typingIndicator.remove();
+    const data = await response.json();
+    typingIndicator.remove();
 
-if (!data.choices || !data.choices[0]) {
-      sendButton.disabled = false;
-      sendButton.textContent = originalText;
-
+    if (!data.choices || !data.choices[0]) {
       chatLog.innerHTML += `
         <div class="message ai">
-          <div class="bubble error">⚠️ Er ging iets mis: ${data.error || "Geen geldig antwoord"}</div>
+          <div class="bubble error">${textLabels[language].error}</div>
         </div>
       `;
+      scrollToBottom();
       return;
     }
 
@@ -84,34 +90,33 @@ if (!data.choices || !data.choices[0]) {
       <div class="message ai">
         <div class="bubble">⚖️ ${aiMessage}</div>
       </div>
-      `;
+    `;
     scrollToBottom();
   } catch (error) {
     typingIndicator.remove();
     chatLog.innerHTML += `
       <div class="message ai">
-        <div class="bubble error">${textLabels[language].error}</div>
-     </div>
+        <div class="bubble error">${textLabels[language].network}</div>
+      </div>
     `;
     console.error("Fout:", error);
     scrollToBottom();
   } finally {
-    sendButton.disabled = false;
-    sendButton.textContent = textLabels[language].send;
     inputField.disabled = false;
     inputField.focus();
+    sendButton.disabled = false;
+    sendButton.textContent = originalText;
   }
 }
 
-// Alles pas uitvoeren als de HTML volledig is geladen
+// ✅ Bij laden: placeholder, button label, enter-verzending, focus
 window.addEventListener("DOMContentLoaded", function () {
   const input = document.getElementById("user-input");
   const sendButton = document.querySelector("button");
 
-  input.placeholder = textLabels[language].placeholder; 
+  input.placeholder = textLabels[language].placeholder;
   sendButton.textContent = textLabels[language].send;
-  
-  // ENTER verzendt het bericht
+
   input.addEventListener("keydown", function (event) {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -119,6 +124,5 @@ window.addEventListener("DOMContentLoaded", function () {
     }
   });
 
-  // Cursor direct actief maken
   input.focus();
 });
