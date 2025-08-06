@@ -88,7 +88,7 @@ async function sendMessage() {
     const aiMessage = data.choices[0].message.content;
     chatLog.innerHTML += `
       <div class="message ai">
-        <div class="bubble">⚖️ ${aiMessage}</div>
+        <div class="bubble formatted-output">⚖️ ${aiMessage}</div>
       </div>
     `;
     scrollToBottom();
