@@ -153,3 +153,23 @@ button:hover {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
+/* ✅ Mooie opmaak voor Joop's antwoorden */
+.formatted-output {
+  line-height: 1.6;
+  white-space: pre-wrap;
+  font-size: 1rem;
+  background-color: #f3f6fb;
+  padding: 1rem;
+  border-radius: 10px;
+}
+
+.formatted-output strong {
+  display: block;
+  margin-top: 1rem;
+  font-weight: bold;
+}
+
+.formatted-output ul {
+  margin: 0.5rem 0;
+  padding-left: 1.2rem;
+}
