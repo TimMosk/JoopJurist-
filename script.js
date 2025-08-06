@@ -142,4 +142,7 @@ window.addEventListener("DOMContentLoaded", function () {
   });
 
   input.focus();
+  
+  // 👇 Start intake-gesprek zodra pagina geladen is
+  startIntake();
 });
