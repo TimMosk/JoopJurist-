@@ -85,7 +85,7 @@ async function sendMessage() {
       return;
     }
 
-    const aiMessage = data.choices[0].message.content;
+    const aiMessage = marked.parse(data.choices[0].message.content);
     chatLog.innerHTML += `
       <div class="message ai">
         <div class="bubble formatted-output">⚖️ ${aiMessage}</div>
