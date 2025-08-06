@@ -179,3 +179,13 @@ button:hover {
   padding: 2px 4px;
   border-radius: 4px;
 }
+.formatted-output h1 {
+  font-size: 1.5rem;
+  margin: 1rem 0 0.5rem;
+}
+
+.formatted-output h2 {
+  font-size: 1.3rem;
+  margin: 1rem 0 0.5rem;
+  color: #333;
+}
