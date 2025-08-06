@@ -26,6 +26,23 @@ function scrollToBottom() {
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 
+function startIntake() {
+  const chatLog = document.getElementById("chat-log");
+
+  chatLog.innerHTML += `
+    <div class="message ai">
+      <div class="bubble">
+        ⚖️ Om je goed te kunnen helpen heb ik wat informatie van je nodig. Denk aan het onderwerp, de datum, bedragen, adressen en namen van betrokkenen.<br><br>
+        Je kunt kiezen hoe je dat liever aanlevert:<br>
+        <strong>1.</strong> In een gesprek (vraag voor vraag)<br>
+        <strong>2.</strong> Alles in één tabel<br>
+        <strong>3.</strong> Meerkeuze waar mogelijk<br><br>
+        Je kunt altijd later aangeven als je wil wisselen van methode.
+      </div>
+    </div>
+  `;
+  scrollToBottom();
+}
 async function sendMessage() {
   const inputField = document.getElementById("user-input");
   const sendButton = document.querySelector("button");
