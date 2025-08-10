@@ -89,18 +89,32 @@ async function sendMessage() {
       throw new Error(`Server returned ${response.status}`);
     }
 
-    const data = await response.json();
-    typingIndicator.remove();
+const data = await response.json();
+typingIndicator.remove();
 
-    if (!data.choices || !data.choices[0]) {
-      chatLog.innerHTML += `
-        <div class="message ai">
-          <div class="bubble error">${textLabels[language].error}</div>
-        </div>
-      `;
-      scrollToBottom();
-      return;
-    }
+if (!response.ok) {
+  chatLog.innerHTML += `
+    <div class="message ai">
+      <div class="bubble error">
+        ⚠️ Fout ${response.status}: ${data.error || "Onbekende fout"}
+      </div>
+    </div>
+  `;
+  console.error("OpenAI API-fout:", data.details || data);
+  scrollToBottom();
+  return;
+}
+
+if (!data.choices || !data.choices[0]) {
+  chatLog.innerHTML += `
+    <div class="message ai">
+      <div class="bubble error">⚠️ Geen geldig antwoord ontvangen van GPT-5.</div>
+    </div>
+  `;
+  console.error("Geen geldig antwoord:", data);
+  scrollToBottom();
+  return;
+}
 
     const aiMessage = marked.parse(data.choices[0].message.content);
     chatLog.innerHTML += `
