@@ -1,3 +1,5 @@
+const MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
+
 export default async function handler(req, res) {
   const apiKey = process.env.OPENAI_API_KEY;
 
@@ -15,7 +17,7 @@ export default async function handler(req, res) {
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'gpt-5',
+        model: MODEL,
         messages: [
           {
             role: 'system',
