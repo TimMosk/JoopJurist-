@@ -1,4 +1,4 @@
-const MODEL = process.env.OPENAI_MODEL || 'gpt-5';
+const MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
 
 export default async function handler(req, res) {
   const apiKey = process.env.OPENAI_API_KEY;
