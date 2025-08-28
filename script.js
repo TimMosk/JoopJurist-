@@ -358,9 +358,9 @@ Verkoper verklaart eigenaar te zijn en dat het object vrij is van beslagen en be
 Op deze overeenkomst is **${f("recht.toepasselijk","Nederlands recht")}** van toepassing.
 Geschillen worden exclusief voorgelegd aan de **${f("forum.rechtbank","dichtstbijzijnde rechtbank bij woonplaats koper")}**.
 
-+**Ondertekening**
-+${f("koper.naam","Koper")} – datum handtekening: _____________________
-+${f("verkoper.naam","Verkoper")} – datum handtekening: _____________________
+**Ondertekening**
+Plaats: _____________________   Datum: _____________________
+Koper: ______________________   Verkoper: ___________________
 `
   ].join("\n");
 }
