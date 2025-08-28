@@ -1,5 +1,5 @@
 // script.js — JoopJurist "spullen" (koop roerende zaken)
-// v1.3.0
+// v1.3.1
 
 const language = "nl";
 
@@ -46,6 +46,9 @@ function addAiMessageMarkdown(md) {
 function escapeHtml(s) {
   return (s || "").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
+function getSendButton() {
+  return document.getElementById("send-btn") || document.querySelector("button");
+}
 
 // ====== 1) Gespreks-state & router ======
 const PHASE = {
@@ -66,11 +69,15 @@ const state = {
   intent: null,              // koop_spullen
   objectDetected: null,      // fiets, laptop, ...
   didAssumptiveIntro: false,
-  proposalStep: 0,           // 0=alleen assumptie, 1=keuzevraag, 2=omschrijving-voorstel
+  proposalStep: 0,           // 0=assumptie, 1=keuzevraag, daarna naar COLLECT
   fields: {},                // ingevulde velden
   sources: {},               // bron per veld (user | ai-proposed)
   lastAsked: null            // laatst gevraagde veldpad
 };
+
+// anti-dubbel guards
+let turnCounter = 0;
+let lastHandledTurn = -1;
 
 // ====== 2) Basis-schema "spullen" ======
 const schema = {
@@ -201,7 +208,7 @@ function parseDutchDate(s) {
   return null;
 }
 
-// ==== Natuurlijke NL datums (“morgen”, “over twee weken”, “12 oktober”, “a.s. vrijdag”, “12/10”) ====
+// ==== Natuurlijke NL datums ====
 function parseHumanDateNL(text, now = new Date()) {
   if (!text) return null;
   const t = text.toLowerCase();
@@ -217,9 +224,10 @@ function parseHumanDateNL(text, now = new Date()) {
   };
   const weekdays = ["zondag","maandag","dinsdag","woensdag","donderdag","vrijdag","zaterdag"];
 
-  // vandaag / morgen
+  // vandaag / morgen / overmorgen
   if (/\bvandaag\b/.test(t)) return today.toISOString().slice(0,10);
   if (/\bmorgen\b/.test(t)) return addDays(today, 1).toISOString().slice(0,10);
+  if (/\bovermorgen\b/.test(t)) return addDays(today, 2).toISOString().slice(0,10);
 
   // over N dagen / weken / maanden (N als cijfer of woord)
   let m;
@@ -236,20 +244,22 @@ function parseHumanDateNL(text, now = new Date()) {
     const d = new Date(today); d.setMonth(d.getMonth() + n); return d.toISOString().slice(0,10);
   }
 
-  // (a.s.|aanstaande|komende) vrijdag
-  if (m = t.match(/\b(?:a\.s\.|aanstaande|as\.?|komende)\s+(maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag|zondag)\b/)) {
+  // binnen X dagen/weken
+  if (m = t.match(/\bbinnen\s+(\d+)\s*dag(?:en)?\b/)) return addDays(today, parseInt(m[1],10)).toISOString().slice(0,10);
+  if (m = t.match(/\bbinnen\s+(\d+)\s*week(?:en)?\b/)) return addDays(today, parseInt(m[1],10)*7).toISOString().slice(0,10);
+
+  // (a.s.|aanstaande|komende|deze|volgende) vrijdag
+  if (m = t.match(/\b(?:a\.s\.|aanstaande|as\.?|komende|deze|volgende)\s+(maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag|zondag)\b/)) {
     const target = weekdays.indexOf(m[1]);
-    const diff = (target - today.getDay() + 7) % 7 || 7; // altijd volgende
+    const diff = (target - today.getDay() + 7) % 7 || 7; // volgende
     return addDays(today, diff).toISOString().slice(0,10);
   }
 
-  // volgende week dinsdag
-  if (m = t.match(/\bvolgende\s+week\s+(maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag|zondag)\b/)) {
+  // losse "volgende dinsdag"
+  if (m = t.match(/\bvolgende\s+(maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag|zondag)\b/)) {
     const target = weekdays.indexOf(m[1]);
-    const nextMon = addDays(today, ((8 - today.getDay()) % 7) || 7); // maandag volgende week
-    const diff = (target + 6) % 7; // 0=ma → zo=6
-    const d2 = addDays(nextMon, diff);
-    return d2.toISOString().slice(0,10);
+    const diff = (target - today.getDay() + 7) % 7 || 7;
+    return addDays(today, diff).toISOString().slice(0,10);
   }
 
   // 12 oktober 2025 / 12 okt 2025
@@ -267,10 +277,11 @@ function parseHumanDateNL(text, now = new Date()) {
   }
 
   // 12-10 / 12/10 (zonder jaar → dit jaar, of volgend jaar als voorbij)
-  if (m = t.match(/\b(\d{1,2})[-/](\d{1,2})(?:[-/](\d{4}))?\b/)) {
-    const d = parseInt(m[1],10), mo = parseInt(m[2],10)-1, y = m[3] ? parseInt(m[3],10) : today.getFullYear();
+  let m2;
+  if (m2 = t.match(/\b(\d{1,2})[-/](\d{1,2})(?:[-/](\d{4}))?\b/)) {
+    const d = parseInt(m2[1],10), mo = parseInt(m2[2],10)-1, y = m2[3] ? parseInt(m2[3],10) : today.getFullYear();
     let cand = new Date(y, mo, d);
-    if (!m[3] && cand < today) cand = new Date(y+1, mo, d);
+    if (!m2[3] && cand < today) cand = new Date(y+1, mo, d);
     return cand.toISOString().slice(0,10);
   }
 
@@ -386,6 +397,9 @@ ${f("verkoper.naam","Verkoper")} – datum handtekening: _____________________
 
 // ====== 10) Gesprekslogica (router) ======
 function handleLocal(userMsg) {
+  // guard: verwerk max 1x per turn
+  if (lastHandledTurn === turnCounter) return true;
+
   // 1) intent (assumptief)
   if (state.phase === PHASE.IDLE || state.phase === PHASE.INTENT) {
     const cls = classifyIntent(userMsg);
@@ -439,6 +453,7 @@ function handleLocal(userMsg) {
       if (!get(state.fields,"object.omschrijving")) {
         set(state.fields,"object.omschrijving", suggestionFor(state.objectDetected));
         state.sources["object.omschrijving"] = "ai-proposed";
+        state.lastAsked = null;
       }
     }
 
@@ -450,15 +465,17 @@ function handleLocal(userMsg) {
     }
 
     // Namen expliciet herkennen (flexibeler)
-    const koperMatch = userMsg.match(/(?:^|\b)koper(?:\s+is)?[:\-]?\s+(.+)$/i);
+    const koperMatch = userMsg.match(/\bkoper(?:\s+is)?[:\-]?\s+([A-Z][^\n\r,.;]{1,80})/i);
     if (koperMatch) {
-      set(state.fields, "koper.naam", koperMatch[1].trim());
+      set(state.fields, "koper.naam", koperMatch[1].trim().replace(/[”"']+$/,"").trim());
       state.sources["koper.naam"] = "user";
+      if (state.lastAsked === "koper.naam") state.lastAsked = null;
     }
-    const verkoperMatch = userMsg.match(/(?:^|\b)verkoper(?:\s+is)?[:\-]?\s+(.+)$/i);
+    const verkoperMatch = userMsg.match(/\bverkoper(?:\s+is)?[:\-]?\s+([A-Z][^\n\r,.;]{1,80})/i);
     if (verkoperMatch) {
-      set(state.fields, "verkoper.naam", verkoperMatch[1].trim());
+      set(state.fields, "verkoper.naam", verkoperMatch[1].trim().replace(/[”"']+$/,"").trim());
       state.sources["verkoper.naam"] = "user";
+      if (state.lastAsked === "verkoper.naam") state.lastAsked = null;
     }
 
     // Vrije tekst als omschrijving (alleen als dat net gevraagd is)
@@ -467,16 +484,25 @@ function handleLocal(userMsg) {
       if (val && !/^(ja|nee)$/i.test(val) && !get(state.fields,"object.omschrijving")) {
         set(state.fields,"object.omschrijving", val);
         state.sources["object.omschrijving"] = "user";
+        state.lastAsked = null;
       }
     }
 
-    // Fallback: als we zojuist om een specifiek veld vroegen en de input lijkt een waarde,
-    // zet het direct (vooral voor namen)
-    if (state.lastAsked && !get(state.fields, state.lastAsked)) {
-      const val = userMsg.trim();
-      if (val && val.length > 1 && !/^ja$|^nee$/i.test(val)) {
-        set(state.fields, state.lastAsked, val.replace(/^(koper|verkoper)[:\-]\s*/i,"").trim());
-        state.sources[state.lastAsked] = "user";
+    // Als expliciet om een naam is gevraagd, accepteer "Voornaam Achternaam"
+    if (state.lastAsked === "koper.naam" && !get(state.fields,"koper.naam")) {
+      const m = userMsg.trim().match(/^[A-ZÁÉÍÓÚÄËÏÖÜ][\w'’\-]+(?:\s+[A-ZÁÉÍÓÚÄËÏÖÜ][\w'’\-]+){0,3}$/);
+      if (m) {
+        set(state.fields,"koper.naam", m[0].trim());
+        state.sources["koper.naam"] = "user";
+        state.lastAsked = null;
+      }
+    }
+    if (state.lastAsked === "verkoper.naam" && !get(state.fields,"verkoper.naam")) {
+      const m = userMsg.trim().match(/^[A-ZÁÉÍÓÚÄËÏÖÜ][\w'’\-]+(?:\s+[A-ZÁÉÍÓÚÄËÏÖÜ][\w'’\-]+){0,3}$/);
+      if (m) {
+        set(state.fields,"verkoper.naam", m[0].trim());
+        state.sources["verkoper.naam"] = "user";
+        state.lastAsked = null;
       }
     }
 
@@ -551,8 +577,6 @@ function requiredMissing() {
 
 function nextQuestion() {
   // in logische volgorde vragen wat nog ontbreekt
-  const missing = requiredMissing();
-
   if (!get(state.fields,"object.omschrijving")) {
     const base = suggestionFor(state.objectDetected);
     state.lastAsked = "object.omschrijving";
@@ -590,23 +614,30 @@ function nextQuestion() {
 // ====== Verzenden / event binding ======
 async function sendMessage() {
   const inputField = document.getElementById("user-input");
-  const sendButton = document.querySelector("button");
+  const sendButton = getSendButton();
   const chatLog = document.getElementById("chat-log");
   const originalText = textLabels[language].send;
   const userMessage = inputField.value.trim();
   if (!userMessage) return;
+
+  const myTurn = ++turnCounter;
 
   addUserMessage(userMessage);
   inputField.value = "";
 
   // Probeer lokaal af te handelen (onze 10-stappenflow)
   const handled = handleLocal(userMessage);
-  if (handled) return;
+  if (handled) {
+    lastHandledTurn = myTurn;
+    return;
+  }
 
   // Zo niet: val terug op backend (optioneel / toekomstig)
   inputField.disabled = true;
-  sendButton.disabled = true;
-  sendButton.innerHTML = `<span class="spinner"></span> ${textLabels[language].sending}`;
+  if (sendButton) {
+    sendButton.disabled = true;
+    sendButton.innerHTML = `<span class="spinner"></span> ${textLabels[language].sending}`;
+  }
 
   // Typ-indicator
   const typingIndicator = document.createElement("div");
@@ -647,24 +678,36 @@ async function sendMessage() {
   } finally {
     inputField.disabled = false;
     inputField.focus();
-    sendButton.disabled = false;
-    sendButton.textContent = originalText;
+    if (sendButton) {
+      sendButton.disabled = false;
+      sendButton.textContent = originalText;
+    }
   }
 }
 
 // Init
 window.addEventListener("DOMContentLoaded", function () {
   const input = document.getElementById("user-input");
-  const sendButton = document.querySelector("button");
-  input.placeholder = textLabels[language].placeholder;
-  sendButton.textContent = textLabels[language].send;
+  const sendButton = getSendButton();
 
+  // cache labels
+  input.placeholder = textLabels[language].placeholder;
+  if (sendButton) sendButton.textContent = textLabels[language].send;
+
+  // verwijder inline onclick (voorkomt dubbele calls) en bind JS-click
+  if (sendButton) {
+    sendButton.onclick = null; // kill inline onclick als die bestond
+    sendButton.addEventListener("click", sendMessage, { once: false });
+  }
+
+  // Enter-to-send
   input.addEventListener("keydown", function (event) {
     if (event.key === "Enter") {
       event.preventDefault();
       sendMessage();
     }
   });
+
   input.focus();
   // Geen onboarding — we wachten op de eerste user input
 });
