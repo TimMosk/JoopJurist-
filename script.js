@@ -1,5 +1,5 @@
 // script.js — JoopJurist "spullen" (koop roerende zaken)
-// v1.2.0
+// v1.3.0
 
 const language = "nl";
 
@@ -51,7 +51,7 @@ function escapeHtml(s) {
 const PHASE = {
   IDLE: "idle",
   INTENT: "intent",
-  PROPOSAL: "proposal",      // voorstel + slimme voorinvulling
+  PROPOSAL: "proposal",      // voorstel-flow in meerdere microstappen
   COLLECT: "collect",        // details verzamelen
   VALIDATE: "validate",
   CONCEPT: "concept",
@@ -66,6 +66,7 @@ const state = {
   intent: null,              // koop_spullen
   objectDetected: null,      // fiets, laptop, ...
   didAssumptiveIntro: false,
+  proposalStep: 0,           // 0=alleen assumptie, 1=keuzevraag, 2=omschrijving-voorstel
   fields: {},                // ingevulde velden
   sources: {},               // bron per veld (user | ai-proposed)
   lastAsked: null            // laatst gevraagde veldpad
@@ -82,7 +83,7 @@ const schema = {
     "prijs.bedrag",
     "levering.datum",
     "levering.plaats",
-    "forum.woonplaats_gebruiker" // nodig om dichtstbijzijnde rechtbank te bepalen
+    "forum.woonplaats_gebruiker"
   ],
   optional: [
     "koper.adres",
@@ -94,7 +95,7 @@ const schema = {
     "garantie.type"
   ],
   fixed: {
-    "recht.toepasselijk": "Nederlands recht" // altijd NL recht
+    "recht.toepasselijk": "Nederlands recht"
   }
 };
 
@@ -148,11 +149,11 @@ function extractFields(text) {
   const yearMatch = t.match(/\b(20\d{2})\b/);
   if (yearMatch) out["object.jaar"] = yearMatch[1];
 
-  // kleur (veelvoorkomende NL kleuren)
+  // kleur
   const kleurMatch = t.match(/\b(zwart|wit|blauw|rood|grijs|groen|geel|bruin|zilver)\b/);
   if (kleurMatch) out["object.kleur"] = kleurMatch[1];
 
-  // merk (grof, fiets/elektronica)
+  // merk
   const merkMatch = t.match(/\b(batavus|cortina|gazelle|cube|trek|giant|apple|dell|hp|samsung|sony|canon|nikon|fujifilm)\b/);
   if (merkMatch) out["object.merk"] = capitalize(merkMatch[1]);
 
@@ -169,7 +170,7 @@ function extractFields(text) {
     }
   }
 
-  // plaats (heuristiek): na woorden "in" of "te" + kapitaalwoord
+  // plaats (heuristiek): na "in" of "te" + kapitaalwoord
   const placeMatch = text.match(/\b(?:in|te)\s+([A-ZÁÉÍÓÚÄËÏÖÜ][\w\- ]{2,})/);
   if (placeMatch) out["levering.plaats"] = placeMatch[1].trim();
 
@@ -200,12 +201,16 @@ function parseDutchDate(s) {
   return null;
 }
 
-// Nieuw: natuurlijke NL datums (“morgen”, “over 2 weken”, “12 oktober 2025”, “a.s. vrijdag”, “12/10”)
+// ==== Natuurlijke NL datums (“morgen”, “over twee weken”, “12 oktober”, “a.s. vrijdag”, “12/10”) ====
 function parseHumanDateNL(text, now = new Date()) {
   if (!text) return null;
   const t = text.toLowerCase();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const addDays = (base, d) => new Date(base.getFullYear(), base.getMonth(), base.getDate() + d);
+
+  const NUM_WORDS = {
+    "een":1,"één":1,"twee":2,"drie":3,"vier":4,"vijf":5,"zes":6,"zeven":7,"acht":8,"negen":9,"tien":10,"elf":11,"twaalf":12
+  };
   const months = {
     "januari":0,"jan":0,"februari":1,"feb":1,"maart":2,"mrt":2,"april":3,"apr":3,"mei":4,"juni":5,"jun":5,
     "juli":6,"jul":6,"augustus":7,"aug":7,"september":8,"sep":8,"sept":8,"oktober":9,"okt":9,"november":10,"nov":10,"december":11,"dec":11
@@ -216,25 +221,32 @@ function parseHumanDateNL(text, now = new Date()) {
   if (/\bvandaag\b/.test(t)) return today.toISOString().slice(0,10);
   if (/\bmorgen\b/.test(t)) return addDays(today, 1).toISOString().slice(0,10);
 
-  // over N dagen / weken / maanden
+  // over N dagen / weken / maanden (N als cijfer of woord)
   let m;
-  if (m = t.match(/\bover\s+(\d+)\s*dag(?:en)?\b/)) return addDays(today, parseInt(m[1],10)).toISOString().slice(0,10);
-  if (m = t.match(/\bover\s+(\d+)\s*week(?:en)?\b/)) return addDays(today, parseInt(m[1],10)*7).toISOString().slice(0,10);
-  if (m = t.match(/\bover\s+(\d+)\s*maand(?:en)?\b/)) {
-    const d = new Date(today); d.setMonth(d.getMonth() + parseInt(m[1],10)); return d.toISOString().slice(0,10);
+  if (m = t.match(/\bover\s+(\d+|een|één|twee|drie|vier|vijf|zes|zeven|acht|negen|tien|elf|twaalf)\s*dag(?:en)?\b/)) {
+    const n = isNaN(m[1]) ? NUM_WORDS[m[1]] : parseInt(m[1],10);
+    return addDays(today, n).toISOString().slice(0,10);
+  }
+  if (m = t.match(/\bover\s+(\d+|een|één|twee|drie|vier|vijf|zes|zeven|acht|negen|tien|elf|twaalf)\s*week(?:en)?\b/)) {
+    const n = isNaN(m[1]) ? NUM_WORDS[m[1]] : parseInt(m[1],10);
+    return addDays(today, n*7).toISOString().slice(0,10);
+  }
+  if (m = t.match(/\bover\s+(\d+|een|één|twee|drie|vier|vijf|zes|zeven|acht|negen|tien|elf|twaalf)\s*maand(?:en)?\b/)) {
+    const n = isNaN(m[1]) ? NUM_WORDS[m[1]] : parseInt(m[1],10);
+    const d = new Date(today); d.setMonth(d.getMonth() + n); return d.toISOString().slice(0,10);
   }
 
-  // a.s. vrijdag / aanstaande vrijdag
-  if (m = t.match(/\b(?:a\.s\.|aanstaande|as\.?)\s+(maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag|zondag)\b/)) {
+  // (a.s.|aanstaande|komende) vrijdag
+  if (m = t.match(/\b(?:a\.s\.|aanstaande|as\.?|komende)\s+(maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag|zondag)\b/)) {
     const target = weekdays.indexOf(m[1]);
     const diff = (target - today.getDay() + 7) % 7 || 7; // altijd volgende
     return addDays(today, diff).toISOString().slice(0,10);
   }
 
-  // volgende week dinsdag, etc.
+  // volgende week dinsdag
   if (m = t.match(/\bvolgende\s+week\s+(maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag|zondag)\b/)) {
     const target = weekdays.indexOf(m[1]);
-    const nextMon = addDays(today, ((8 - today.getDay()) % 7) || 7); // maandag van volgende week
+    const nextMon = addDays(today, ((8 - today.getDay()) % 7) || 7); // maandag volgende week
     const diff = (target + 6) % 7; // 0=ma → zo=6
     const d2 = addDays(nextMon, diff);
     return d2.toISOString().slice(0,10);
@@ -243,11 +255,18 @@ function parseHumanDateNL(text, now = new Date()) {
   // 12 oktober 2025 / 12 okt 2025
   if (m = t.match(/\b(\d{1,2})\s+(januari|jan|februari|feb|maart|mrt|april|apr|mei|juni|jun|juli|jul|augustus|aug|september|sep|sept|oktober|okt|november|nov|december|dec)\s+(\d{4})\b/)) {
     const d = parseInt(m[1],10), mo = months[m[2]], y = parseInt(m[3],10);
-    const iso = new Date(y, mo, d).toISOString().slice(0,10);
-    return iso;
+    return new Date(y, mo, d).toISOString().slice(0,10);
   }
 
-  // 12-10 / 12/10 (zonder jaar → huidig jaar, en als voorbij → volgend jaar)
+  // 12 oktober (zonder jaar → dit jaar, anders volgend jaar)
+  if (m = t.match(/\b(\d{1,2})\s+(januari|jan|februari|feb|maart|mrt|april|apr|mei|juni|jun|juli|jul|augustus|aug|september|sep|sept|oktober|okt|november|nov|december|dec)\b/)) {
+    const d = parseInt(m[1],10), mo = months[m[2]];
+    let cand = new Date(today.getFullYear(), mo, d);
+    if (cand < today) cand = new Date(today.getFullYear()+1, mo, d);
+    return cand.toISOString().slice(0,10);
+  }
+
+  // 12-10 / 12/10 (zonder jaar → dit jaar, of volgend jaar als voorbij)
   if (m = t.match(/\b(\d{1,2})[-/](\d{1,2})(?:[-/](\d{4}))?\b/)) {
     const d = parseInt(m[1],10), mo = parseInt(m[2],10)-1, y = m[3] ? parseInt(m[3],10) : today.getFullYear();
     let cand = new Date(y, mo, d);
@@ -329,7 +348,7 @@ function set(obj, path, val) {
   o[parts[parts.length-1]] = val;
 }
 
-// ====== 9) Clause engine / concept (incl. NL recht & forum) ======
+// ====== 9) Clause engine / concept (incl. Ondertekening zonder plaats) ======
 function buildConcept(fields) {
   const f = (p, d="") => get(fields,p) || d;
   const bedrag = f("prijs.bedrag");
@@ -359,8 +378,8 @@ Op deze overeenkomst is **${f("recht.toepasselijk","Nederlands recht")}** van to
 Geschillen worden exclusief voorgelegd aan de **${f("forum.rechtbank","dichtstbijzijnde rechtbank bij woonplaats koper")}**.
 
 **Ondertekening**
-Plaats: _____________________   Datum: _____________________
-Koper: ______________________   Verkoper: ___________________
+${f("koper.naam","Koper")} – datum handtekening: _____________________
+${f("verkoper.naam","Verkoper")} – datum handtekening: _____________________
 `
   ].join("\n");
 }
@@ -375,35 +394,42 @@ function handleLocal(userMsg) {
       state.objectDetected = cls.object;
       state.phase = PHASE.PROPOSAL;
       state.didAssumptiveIntro = true;
+      state.proposalStep = 0;
 
-      // Korte, menselijke start in 2 bubbels
+      // (0) Eerste beurt: alleen assumptie
       addAiMessageMarkdown(
         `Ik ga uit van een **koopovereenkomst voor spullen (roerende zaak)**, omdat ${cls.object ? `het om een ${cls.object} gaat` : "het om de aankoop van spullen lijkt te gaan"}.`
       );
-      addAiMessageMarkdown(
-        `Hoe wil je de informatie aanleveren? **Chat** (stap voor stap), alles in **één bericht** (‘formulier’), of **meerkeuze**? Je mag ook **'checklist'** zeggen.`
-      );
-      return true; // lokaal afgehandeld
+      return true;
     }
-    // geen koop ⇒ laat backend doen (of vraag verduidelijking)
     return false;
   }
 
-  // 2) voorstel + mode + daarna pas omschrijving
+  // 2) PROPOSAL microstappen
   if (state.phase === PHASE.PROPOSAL) {
-    // mode keus?
-    const mode = parseMode(userMsg);
-    if (mode) state.mode = mode;
-    else if (!state.mode) state.mode = MODE.CHAT;
+    // step 0 → 1: vraag pas nu naar mode
+    if (state.proposalStep === 0) {
+      state.proposalStep = 1;
+      addAiMessageMarkdown(
+        `Hoe wil je de informatie aanleveren? **Chat** (stap voor stap), alles in **één bericht** (‘formulier’), of **meerkeuze**? Je mag ook **'checklist'** zeggen.`
+      );
+      return true;
+    }
 
-    // Toon nu pas de voorgestelde omschrijving (aparte bubbel) en stap naar COLLECT
-    const suggestion = suggestionFor(state.objectDetected);
-    addAiMessageMarkdown(
-      `Zal ik alvast een **omschrijving** voorstellen?\n**Voorstel:** “${suggestion}”.\n**Past dit ongeveer?** Zo niet, noem merk/kleur/jaar/conditie.`
-    );
-    state.lastAsked = "object.omschrijving";
-    state.phase = PHASE.COLLECT;
-    return true;
+    // step 1: verwerk keuze (of default) en ga naar omschrijving
+    if (state.proposalStep === 1) {
+      const mode = parseMode(userMsg);
+      state.mode = mode || MODE.CHAT;
+
+      // Nu pas het omschrijvingsvoorstel
+      const suggestion = suggestionFor(state.objectDetected);
+      addAiMessageMarkdown(
+        `Zal ik alvast een **omschrijving** voorstellen?\n**Voorstel:** “${suggestion}”.\n**Past dit ongeveer?** Zo niet, noem merk/kleur/jaar/conditie.`
+      );
+      state.lastAsked = "object.omschrijving";
+      state.phase = PHASE.COLLECT;
+      return true;
+    }
   }
 
   // 3) COLLECT: vraag-voor-vraag velden verzamelen
@@ -423,22 +449,23 @@ function handleLocal(userMsg) {
       state.sources[k] = "user";
     }
 
-    // Namen expliciet herkennen (ook als extractFields niets vond)
-    const koperMatch = userMsg.match(/^\s*(?:koper[:\-]\s*|koper is\s+)(.+)$/i);
+    // Namen expliciet herkennen (flexibeler)
+    const koperMatch = userMsg.match(/(?:^|\b)koper(?:\s+is)?[:\-]?\s+(.+)$/i);
     if (koperMatch) {
       set(state.fields, "koper.naam", koperMatch[1].trim());
       state.sources["koper.naam"] = "user";
     }
-    const verkoperMatch = userMsg.match(/^\s*(?:verkoper[:\-]\s*|verkoper is\s+)(.+)$/i);
+    const verkoperMatch = userMsg.match(/(?:^|\b)verkoper(?:\s+is)?[:\-]?\s+(.+)$/i);
     if (verkoperMatch) {
       set(state.fields, "verkoper.naam", verkoperMatch[1].trim());
       state.sources["verkoper.naam"] = "user";
     }
 
-    // Ook vrije tekst als omschrijving (alleen als dat net gevraagd is)
-    if (!/prijs|€|\b(\d{1,2}[-/]\d{1,2}[-/]\d{4})\b|levering|woonplaats|betaal|betaling/i.test(userMsg)) {
-      if (!get(state.fields,"object.omschrijving") && /[a-z]/i.test(userMsg) && state.lastAsked === "object.omschrijving") {
-        set(state.fields,"object.omschrijving", userMsg.trim());
+    // Vrije tekst als omschrijving (alleen als dat net gevraagd is)
+    if (state.lastAsked === "object.omschrijving") {
+      const val = userMsg.trim();
+      if (val && !/^(ja|nee)$/i.test(val) && !get(state.fields,"object.omschrijving")) {
+        set(state.fields,"object.omschrijving", val);
         state.sources["object.omschrijving"] = "user";
       }
     }
@@ -526,44 +553,36 @@ function nextQuestion() {
   // in logische volgorde vragen wat nog ontbreekt
   const missing = requiredMissing();
 
-  // 1) object.omschrijving
   if (!get(state.fields,"object.omschrijving")) {
     const base = suggestionFor(state.objectDetected);
     state.lastAsked = "object.omschrijving";
     return `Kun je de **omschrijving van het object** bevestigen of aanpassen?\nBijv.: “${base}”.`;
   }
-  // 2) prijs.bedrag
   if (!get(state.fields,"prijs.bedrag")) {
     state.lastAsked = "prijs.bedrag";
     return `Wat is de **koopprijs**? (bijv. €350)`;
   }
-  // 3) levering.datum
   if (!get(state.fields,"levering.datum")) {
     state.lastAsked = "levering.datum";
     return `Welke **leveringsdatum** wil je gebruiken? (bijv. “morgen” of “12-10-2025”)`;
   }
-  // 4) levering.plaats
   if (!get(state.fields,"levering.plaats")) {
     state.lastAsked = "levering.plaats";
     return `Op welke **plaats** vindt de levering plaats? (bijv. “in Leiden” of “te Utrecht”)`;
   }
-  // 5) koper.naam
   if (!get(state.fields,"koper.naam")) {
     state.lastAsked = "koper.naam";
     return `Wat is de **naam van de koper**? (bijv. “Jan Jansen”)`;
   }
-  // 6) verkoper.naam
   if (!get(state.fields,"verkoper.naam")) {
     state.lastAsked = "verkoper.naam";
     return `Wat is de **naam van de verkoper**? (bijv. “Piet Pieters”)`;
   }
-  // 7) forum.woonplaats_gebruiker
   if (!get(state.fields,"forum.woonplaats_gebruiker")) {
     state.lastAsked = "forum.woonplaats_gebruiker";
     return `Wat is je **woonplaats** (of postcode) voor de forumkeuze (dichtstbijzijnde rechtbank)?`;
   }
 
-  // Als alles er is:
   state.lastAsked = null;
   return `Dank! Ik controleer even alles en toon dan het **concept**.`;
 }
@@ -647,6 +666,5 @@ window.addEventListener("DOMContentLoaded", function () {
     }
   });
   input.focus();
-
   // Geen onboarding — we wachten op de eerste user input
 });
