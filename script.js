@@ -26,23 +26,6 @@ function scrollToBottom() {
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 
-function startIntake() {
-  const chatLog = document.getElementById("chat-log");
-
-  chatLog.innerHTML += `
-    <div class="message ai">
-      <div class="bubble">
-        ⚖️ Om je goed te kunnen helpen heb ik wat informatie van je nodig. Denk aan het onderwerp, de datum, bedragen, adressen en namen van betrokkenen.<br><br>
-        Je kunt kiezen hoe je dat liever aanlevert:<br>
-        <strong>1.</strong> In een gesprek (vraag voor vraag)<br>
-        <strong>2.</strong> Alles in één tabel<br>
-        <strong>3.</strong> Meerkeuze waar mogelijk<br><br>
-        Je kunt altijd later aangeven als je wil wisselen van methode.
-      </div>
-    </div>
-  `;
-  scrollToBottom();
-}
 async function sendMessage() {
   const inputField = document.getElementById("user-input");
   const sendButton = document.querySelector("button");
@@ -89,32 +72,19 @@ async function sendMessage() {
       throw new Error(`Server returned ${response.status}`);
     }
 
-const data = await response.json();
-typingIndicator.remove();
+    const data = await response.json();
+    typingIndicator.remove();
 
-if (!response.ok) {
-  chatLog.innerHTML += `
-    <div class="message ai">
-      <div class="bubble error">
-        ⚠️ Fout ${response.status}: ${data.error || "Onbekende fout"}
-      </div>
-    </div>
-  `;
-  console.error("OpenAI API-fout:", data.details || data);
-  scrollToBottom();
-  return;
-}
-
-if (!data.choices || !data.choices[0]) {
-  chatLog.innerHTML += `
-    <div class="message ai">
-      <div class="bubble error">⚠️ Geen geldig antwoord ontvangen van GPT-5.</div>
-    </div>
-  `;
-  console.error("Geen geldig antwoord:", data);
-  scrollToBottom();
-  return;
-}
+    if (!data.choices || !data.choices[0]) {
+      chatLog.innerHTML += `
+        <div class="message ai">
+          <div class="bubble error">⚠️ Geen geldig antwoord ontvangen van GPT-5.</div>
+        </div>
+      `;
+      console.error("Geen geldig antwoord:", data);
+      scrollToBottom();
+      return;
+    }
 
     const aiMessage = marked.parse(data.choices[0].message.content);
     chatLog.innerHTML += `
@@ -156,7 +126,6 @@ window.addEventListener("DOMContentLoaded", function () {
   });
 
   input.focus();
-  
-  // 👇 Start intake-gesprek zodra pagina geladen is
-  startIntake();
+
+  // Geen onboarding; we wachten op de eerste user input
 });
