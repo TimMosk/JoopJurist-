@@ -297,7 +297,7 @@ Op deze overeenkomst is **${f("recht.toepasselijk","Nederlands recht")}** van to
 Geschillen worden exclusief voorgelegd aan de **${f("forum.rechtbank","dichtstbijzijnde rechtbank bij woonplaats koper")}**.
 
 **Ondertekening**
-Plaats: _____________________   Datum: _____________________
+Datum: _____________________    Datum: _____________________
 Koper: ______________________   Verkoper: ___________________
 `
   ].join("\n");
