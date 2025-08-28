@@ -1,5 +1,5 @@
 // script.js — JoopJurist "spullen" (koop roerende zaken)
-// v1.1.0
+// v1.2.0
 
 const language = "nl";
 
@@ -68,9 +68,10 @@ const state = {
   didAssumptiveIntro: false,
   fields: {},                // ingevulde velden
   sources: {},               // bron per veld (user | ai-proposed)
+  lastAsked: null            // laatst gevraagde veldpad
 };
 
-// ====== 2) Basis-schema "spullen" (Stap 5) ======
+// ====== 2) Basis-schema "spullen" ======
 const schema = {
   doc_type: "koop_spullen",
   version: "1.0.0",
@@ -123,7 +124,7 @@ function classifyIntent(msg) {
   return { intent: "unknown", certainty: "low", object: null };
 }
 
-// ====== 4) Slimme voorinvulling (Stap 2 samengevoegd) ======
+// ====== 4) Slimme voorinvulling ======
 function suggestionFor(object) {
   if (object === "fiets") return "stadsfiets, 7 versnellingen, zwart, bouwjaar 2022, goed onderhouden";
   if (object === "laptop") return "14-inch laptop, 16GB RAM, 512GB SSD, gekocht in 2023, nette staat";
@@ -137,30 +138,35 @@ function suggestionFor(object) {
 // ====== 5) Extractie (entity/slot filling) ======
 function extractFields(text) {
   const t = (text || "").toLowerCase();
-
   const out = {};
+
   // prijs: €350 / 350 euro
   const priceMatch = t.match(/(?:€\s*|eur(?:o)?\s*)?(\d{2,6}(?:[.,]\d{2})?)(?:\s*(?:eur|euro))?/i);
   if (priceMatch) out["prijs.bedrag"] = normalizeMoney(priceMatch[1]);
 
-  // jaar: 2020..2026
-  const yearMatch = t.match(/\b(20[0-4]\d|2025|2026)\b/); // simpele range
+  // jaar: 2000-2099 (grof)
+  const yearMatch = t.match(/\b(20\d{2})\b/);
   if (yearMatch) out["object.jaar"] = yearMatch[1];
 
-  // kleur (een paar veelvoorkomende NL kleuren)
+  // kleur (veelvoorkomende NL kleuren)
   const kleurMatch = t.match(/\b(zwart|wit|blauw|rood|grijs|groen|geel|bruin|zilver)\b/);
   if (kleurMatch) out["object.kleur"] = kleurMatch[1];
 
-  // merk (heel grof, voor fiets/elek)
+  // merk (grof, fiets/elektronica)
   const merkMatch = t.match(/\b(batavus|cortina|gazelle|cube|trek|giant|apple|dell|hp|samsung|sony|canon|nikon|fujifilm)\b/);
   if (merkMatch) out["object.merk"] = capitalize(merkMatch[1]);
 
-  // leveringsdatum: dd-mm-jjjj of jjjj-mm-dd
-  const dateMatch = t.match(/\b(\d{1,2}[-/]\d{1,2}[-/]\d{4})\b|\b(20\d{2}-\d{2}-\d{2})\b/);
-  if (dateMatch) {
-    const raw = dateMatch[1] || dateMatch[2];
-    const parsed = parseDutchDate(raw);
-    if (parsed) out["levering.datum"] = parsed;
+  // leveringsdatum: natuurlijke NL datum óf klassieke notatie
+  const humanDate = parseHumanDateNL(text);
+  if (humanDate) {
+    out["levering.datum"] = humanDate;
+  } else {
+    const dateMatch = t.match(/\b(\d{1,2}[-/]\d{1,2}[-/]\d{4})\b|\b(20\d{2}-\d{2}-\d{2})\b/);
+    if (dateMatch) {
+      const raw = dateMatch[1] || dateMatch[2];
+      const parsed = parseDutchDate(raw);
+      if (parsed) out["levering.datum"] = parsed;
+    }
   }
 
   // plaats (heuristiek): na woorden "in" of "te" + kapitaalwoord
@@ -171,10 +177,9 @@ function extractFields(text) {
   const woonMatch = text.match(/\b(?:woon(?:plaats)?|ik woon in|mijn (?:woon)?plaats is)\s+([A-Z][\w\- ]{2,})/i);
   if (woonMatch) out["forum.woonplaats_gebruiker"] = woonMatch[1].trim();
 
-  // conditie (een paar woorden)
-  if (/\b(nieuwstaat|zo goed als nieuw|goede staat|gebruikt)\b/.test(t)) {
-    out["object.conditie"] = (t.match(/\b(nieuwstaat|zo goed als nieuw|goede staat|gebruikt)\b/) || [])[1];
-  }
+  // conditie
+  const condMatch = t.match(/\b(nieuwstaat|zo goed als nieuw|goede staat|gebruikt)\b/);
+  if (condMatch) out["object.conditie"] = condMatch[1];
 
   return out;
 }
@@ -186,7 +191,7 @@ function parseDutchDate(s) {
   // dd-mm-yyyy of dd/mm/yyyy
   const m1 = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
   if (m1) {
-    const [_, d, mo, y] = m1.map(Number);
+    const d = Number(m1[1]), mo = Number(m1[2]), y = Number(m1[3]);
     const iso = `${y.toString().padStart(4,"0")}-${mo.toString().padStart(2,"0")}-${d.toString().padStart(2,"0")}`;
     if (!isNaN(Date.parse(iso))) return iso;
   }
@@ -194,6 +199,65 @@ function parseDutchDate(s) {
   if (!isNaN(Date.parse(s))) return s;
   return null;
 }
+
+// Nieuw: natuurlijke NL datums (“morgen”, “over 2 weken”, “12 oktober 2025”, “a.s. vrijdag”, “12/10”)
+function parseHumanDateNL(text, now = new Date()) {
+  if (!text) return null;
+  const t = text.toLowerCase();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const addDays = (base, d) => new Date(base.getFullYear(), base.getMonth(), base.getDate() + d);
+  const months = {
+    "januari":0,"jan":0,"februari":1,"feb":1,"maart":2,"mrt":2,"april":3,"apr":3,"mei":4,"juni":5,"jun":5,
+    "juli":6,"jul":6,"augustus":7,"aug":7,"september":8,"sep":8,"sept":8,"oktober":9,"okt":9,"november":10,"nov":10,"december":11,"dec":11
+  };
+  const weekdays = ["zondag","maandag","dinsdag","woensdag","donderdag","vrijdag","zaterdag"];
+
+  // vandaag / morgen
+  if (/\bvandaag\b/.test(t)) return today.toISOString().slice(0,10);
+  if (/\bmorgen\b/.test(t)) return addDays(today, 1).toISOString().slice(0,10);
+
+  // over N dagen / weken / maanden
+  let m;
+  if (m = t.match(/\bover\s+(\d+)\s*dag(?:en)?\b/)) return addDays(today, parseInt(m[1],10)).toISOString().slice(0,10);
+  if (m = t.match(/\bover\s+(\d+)\s*week(?:en)?\b/)) return addDays(today, parseInt(m[1],10)*7).toISOString().slice(0,10);
+  if (m = t.match(/\bover\s+(\d+)\s*maand(?:en)?\b/)) {
+    const d = new Date(today); d.setMonth(d.getMonth() + parseInt(m[1],10)); return d.toISOString().slice(0,10);
+  }
+
+  // a.s. vrijdag / aanstaande vrijdag
+  if (m = t.match(/\b(?:a\.s\.|aanstaande|as\.?)\s+(maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag|zondag)\b/)) {
+    const target = weekdays.indexOf(m[1]);
+    const diff = (target - today.getDay() + 7) % 7 || 7; // altijd volgende
+    return addDays(today, diff).toISOString().slice(0,10);
+  }
+
+  // volgende week dinsdag, etc.
+  if (m = t.match(/\bvolgende\s+week\s+(maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag|zondag)\b/)) {
+    const target = weekdays.indexOf(m[1]);
+    const nextMon = addDays(today, ((8 - today.getDay()) % 7) || 7); // maandag van volgende week
+    const diff = (target + 6) % 7; // 0=ma → zo=6
+    const d2 = addDays(nextMon, diff);
+    return d2.toISOString().slice(0,10);
+  }
+
+  // 12 oktober 2025 / 12 okt 2025
+  if (m = t.match(/\b(\d{1,2})\s+(januari|jan|februari|feb|maart|mrt|april|apr|mei|juni|jun|juli|jul|augustus|aug|september|sep|sept|oktober|okt|november|nov|december|dec)\s+(\d{4})\b/)) {
+    const d = parseInt(m[1],10), mo = months[m[2]], y = parseInt(m[3],10);
+    const iso = new Date(y, mo, d).toISOString().slice(0,10);
+    return iso;
+  }
+
+  // 12-10 / 12/10 (zonder jaar → huidig jaar, en als voorbij → volgend jaar)
+  if (m = t.match(/\b(\d{1,2})[-/](\d{1,2})(?:[-/](\d{4}))?\b/)) {
+    const d = parseInt(m[1],10), mo = parseInt(m[2],10)-1, y = m[3] ? parseInt(m[3],10) : today.getFullYear();
+    let cand = new Date(y, mo, d);
+    if (!m[3] && cand < today) cand = new Date(y+1, mo, d);
+    return cand.toISOString().slice(0,10);
+  }
+
+  return null;
+}
+
 function capitalize(s){ return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
 // ====== 6) Keuze modes (chat/form/mcq) ======
@@ -208,8 +272,6 @@ function parseMode(text) {
 // ====== 7) Rechtbankkeuze (forum) op basis van woonplaats ======
 function nearestCourt(woonplaats) {
   const t = (woonplaats||"").toLowerCase().trim();
-
-  // simpele mapping (kan later uitgebreid of met geocoding)
   const map = [
     { rx: /den haag|wassenaar|leiden|delft|zoetermeer|scheveningen|voorburg/, court: "Rechtbank Den Haag" },
     { rx: /amsterdam|amstelveen|diemen|zaandam|hoofddorp|haarlem/, court: "Rechtbank Amsterdam / Noord-Holland" },
@@ -226,7 +288,7 @@ function nearestCourt(woonplaats) {
   return "Rechtbank Den Haag"; // fallback
 }
 
-// ====== 8) Validatie (Stap 7) ======
+// ====== 8) Validatie ======
 function validateFields(fields) {
   const errs = [];
 
@@ -241,7 +303,7 @@ function validateFields(fields) {
 
   // datum
   const dat = get(fields, "levering.datum");
-  if (dat && isNaN(Date.parse(dat))) errs.push("Leveringsdatum is ongeldig (gebruik bijv. 12-10-2025).");
+  if (dat && isNaN(Date.parse(dat))) errs.push("Leveringsdatum is ongeldig (bijv. “morgen” of 12-10-2025).");
 
   // forum: woonplaats → rechtbank
   const woon = get(fields, "forum.woonplaats_gebruiker");
@@ -267,7 +329,7 @@ function set(obj, path, val) {
   o[parts[parts.length-1]] = val;
 }
 
-// ====== 9) Clause engine / concept (Stap 9 + NL recht & forum) ======
+// ====== 9) Clause engine / concept (incl. NL recht & forum) ======
 function buildConcept(fields) {
   const f = (p, d="") => get(fields,p) || d;
   const bedrag = f("prijs.bedrag");
@@ -296,9 +358,9 @@ Verkoper verklaart eigenaar te zijn en dat het object vrij is van beslagen en be
 Op deze overeenkomst is **${f("recht.toepasselijk","Nederlands recht")}** van toepassing.
 Geschillen worden exclusief voorgelegd aan de **${f("forum.rechtbank","dichtstbijzijnde rechtbank bij woonplaats koper")}**.
 
-**Ondertekening**
-Datum: _____________________    Datum: _____________________
-Koper: ______________________   Verkoper: ___________________
++**Ondertekening**
++${f("koper.naam","Koper")} – datum handtekening: _____________________
++${f("verkoper.naam","Verkoper")} – datum handtekening: _____________________
 `
   ].join("\n");
 }
@@ -314,70 +376,84 @@ function handleLocal(userMsg) {
       state.phase = PHASE.PROPOSAL;
       state.didAssumptiveIntro = true;
 
-      const suggestion = suggestionFor(cls.object);
-      const intro = [
-        `Ik ga uit van een **koopovereenkomst voor spullen (roerende zaak)**, omdat ${cls.object ? `het om een ${cls.object} gaat` : "het om de aankoop van spullen lijkt te gaan"}.`,
-        `Je kunt informatie aanleveren via **chat** (stap voor stap), alles in één **bericht** (‘formulier’), of **meerkeuze**.`,
-        `**Voorstel objectomschrijving:** “${suggestion}”.`,
-        `**Past dit ongeveer?** Zo niet, noem merk/kleur/jaar/conditie. Je mag ook je **woonplaats** geven (voor de forumkeuze).`,
-        `*NB: Het toepasselijk recht is **altijd Nederlands recht**; geschillen gaan naar de **dichtstbijzijnde rechtbank bij jouw woonplaats***.`
-      ].join("\n");
-      addAiMessageMarkdown(intro);
+      // Korte, menselijke start in 2 bubbels
+      addAiMessageMarkdown(
+        `Ik ga uit van een **koopovereenkomst voor spullen (roerende zaak)**, omdat ${cls.object ? `het om een ${cls.object} gaat` : "het om de aankoop van spullen lijkt te gaan"}.`
+      );
+      addAiMessageMarkdown(
+        `Hoe wil je de informatie aanleveren? **Chat** (stap voor stap), alles in **één bericht** (‘formulier’), of **meerkeuze**? Je mag ook **'checklist'** zeggen.`
+      );
       return true; // lokaal afgehandeld
     }
     // geen koop ⇒ laat backend doen (of vraag verduidelijking)
     return false;
   }
 
-  // 2) voorstel + mode + eerste slots
+  // 2) voorstel + mode + daarna pas omschrijving
   if (state.phase === PHASE.PROPOSAL) {
     // mode keus?
     const mode = parseMode(userMsg);
     if (mode) state.mode = mode;
     else if (!state.mode) state.mode = MODE.CHAT;
 
-    // neem AI-voorstel over als user "ja" of soortgelijk zegt
-    if (/^(ja|klopt|prima|ok|oke|okay)\b/i.test(userMsg)) {
-      // zet de object-omschrijving als nog niet gezet
+    // Toon nu pas de voorgestelde omschrijving (aparte bubbel) en stap naar COLLECT
+    const suggestion = suggestionFor(state.objectDetected);
+    addAiMessageMarkdown(
+      `Zal ik alvast een **omschrijving** voorstellen?\n**Voorstel:** “${suggestion}”.\n**Past dit ongeveer?** Zo niet, noem merk/kleur/jaar/conditie.`
+    );
+    state.lastAsked = "object.omschrijving";
+    state.phase = PHASE.COLLECT;
+    return true;
+  }
+
+  // 3) COLLECT: vraag-voor-vraag velden verzamelen
+  if (state.phase === PHASE.COLLECT) {
+    // Als we net om omschrijving vroegen en user zegt "ja/klopt", neem voorstel over
+    if (state.lastAsked === "object.omschrijving" && /^(ja|klopt|prima|ok|oke|okay)\b/i.test(userMsg)) {
       if (!get(state.fields,"object.omschrijving")) {
         set(state.fields,"object.omschrijving", suggestionFor(state.objectDetected));
         state.sources["object.omschrijving"] = "ai-proposed";
       }
     }
 
-    // pak eventuele direct ingevulde velden uit userMsg
+    // verwerk user input → velden (prijs, datum, plaats, woonplaats, etc.)
     const extracted = extractFields(userMsg);
     for (const k of Object.keys(extracted)) {
       set(state.fields, k, extracted[k]);
       state.sources[k] = "user";
     }
 
-    // Als we nog geen woonplaats hebben en user noemt een plaats met "ik woon in …", pakten we die hierboven al.
-    // Vraag nu gericht door afhankelijk van mode
-    state.phase = PHASE.COLLECT;
-    addAiMessageMarkdown(nextQuestion());
-    return true;
-  }
-
-  // 3) COLLECT: vraag-voor-vraag velden verzamelen
-  if (state.phase === PHASE.COLLECT) {
-    // verwerk user input → velden
-    const extracted = extractFields(userMsg);
-    for (const k of Object.keys(extracted)) {
-      set(state.fields, k, extracted[k]);
-      state.sources[k] = "user";
+    // Namen expliciet herkennen (ook als extractFields niets vond)
+    const koperMatch = userMsg.match(/^\s*(?:koper[:\-]\s*|koper is\s+)(.+)$/i);
+    if (koperMatch) {
+      set(state.fields, "koper.naam", koperMatch[1].trim());
+      state.sources["koper.naam"] = "user";
+    }
+    const verkoperMatch = userMsg.match(/^\s*(?:verkoper[:\-]\s*|verkoper is\s+)(.+)$/i);
+    if (verkoperMatch) {
+      set(state.fields, "verkoper.naam", verkoperMatch[1].trim());
+      state.sources["verkoper.naam"] = "user";
     }
 
-    // ook vrije tekst overnemen als object-omschrijving als user duidelijk corrigeert
+    // Ook vrije tekst als omschrijving (alleen als dat net gevraagd is)
     if (!/prijs|€|\b(\d{1,2}[-/]\d{1,2}[-/]\d{4})\b|levering|woonplaats|betaal|betaling/i.test(userMsg)) {
-      // heuristiek: als user iets als "Batavus, blauw, 2021" zegt
-      if (!get(state.fields,"object.omschrijving") && /[a-z]/i.test(userMsg)) {
+      if (!get(state.fields,"object.omschrijving") && /[a-z]/i.test(userMsg) && state.lastAsked === "object.omschrijving") {
         set(state.fields,"object.omschrijving", userMsg.trim());
         state.sources["object.omschrijving"] = "user";
       }
     }
 
-    // vraag volgende of ga valideren
+    // Fallback: als we zojuist om een specifiek veld vroegen en de input lijkt een waarde,
+    // zet het direct (vooral voor namen)
+    if (state.lastAsked && !get(state.fields, state.lastAsked)) {
+      const val = userMsg.trim();
+      if (val && val.length > 1 && !/^ja$|^nee$/i.test(val)) {
+        set(state.fields, state.lastAsked, val.replace(/^(koper|verkoper)[:\-]\s*/i,"").trim());
+        state.sources[state.lastAsked] = "user";
+      }
+    }
+
+    // Vraag volgende of ga valideren
     const missing = requiredMissing();
     if (missing.length === 0) {
       state.phase = PHASE.VALIDATE;
@@ -394,7 +470,7 @@ function handleLocal(userMsg) {
         return true;
       }
     } else {
-      // vraag volgende
+      // stel de volgende, korte vraag
       addAiMessageMarkdown(nextQuestion());
       return true;
     }
@@ -402,7 +478,7 @@ function handleLocal(userMsg) {
 
   // 4) DONE: bewerkingen/aanpassingen
   if (state.phase === PHASE.DONE) {
-    // laat aanpassingen toe: parse opnieuw en toon geüpdatet concept
+    // aanpassingen oppakken
     const extracted = extractFields(userMsg);
     for (const k of Object.keys(extracted)) {
       set(state.fields, k, extracted[k]);
@@ -453,34 +529,42 @@ function nextQuestion() {
   // 1) object.omschrijving
   if (!get(state.fields,"object.omschrijving")) {
     const base = suggestionFor(state.objectDetected);
+    state.lastAsked = "object.omschrijving";
     return `Kun je de **omschrijving van het object** bevestigen of aanpassen?\nBijv.: “${base}”.`;
   }
   // 2) prijs.bedrag
   if (!get(state.fields,"prijs.bedrag")) {
+    state.lastAsked = "prijs.bedrag";
     return `Wat is de **koopprijs**? (bijv. €350)`;
   }
   // 3) levering.datum
   if (!get(state.fields,"levering.datum")) {
-    return `Welke **leveringsdatum** wil je gebruiken? (bijv. 12-10-2025)`;
+    state.lastAsked = "levering.datum";
+    return `Welke **leveringsdatum** wil je gebruiken? (bijv. “morgen” of “12-10-2025”)`;
   }
   // 4) levering.plaats
   if (!get(state.fields,"levering.plaats")) {
+    state.lastAsked = "levering.plaats";
     return `Op welke **plaats** vindt de levering plaats? (bijv. “in Leiden” of “te Utrecht”)`;
   }
   // 5) koper.naam
   if (!get(state.fields,"koper.naam")) {
-    return `Wat is de **naam van de koper**? (bijv. “Koper: Jan Jansen”)`;
+    state.lastAsked = "koper.naam";
+    return `Wat is de **naam van de koper**? (bijv. “Jan Jansen”)`;
   }
   // 6) verkoper.naam
   if (!get(state.fields,"verkoper.naam")) {
-    return `Wat is de **naam van de verkoper**? (bijv. “Verkoper: Piet Pieters”)`;
+    state.lastAsked = "verkoper.naam";
+    return `Wat is de **naam van de verkoper**? (bijv. “Piet Pieters”)`;
   }
   // 7) forum.woonplaats_gebruiker
   if (!get(state.fields,"forum.woonplaats_gebruiker")) {
-    return `Wat is je **woonplaats** (of postcode) voor de **forumkeuze** (dichtstbijzijnde rechtbank)?`;
+    state.lastAsked = "forum.woonplaats_gebruiker";
+    return `Wat is je **woonplaats** (of postcode) voor de forumkeuze (dichtstbijzijnde rechtbank)?`;
   }
 
   // Als alles er is:
+  state.lastAsked = null;
   return `Dank! Ik controleer even alles en toon dan het **concept**.`;
 }
 
