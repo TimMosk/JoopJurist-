@@ -1,5 +1,6 @@
 // script.js — JoopJurist "spullen" (koop roerende zaken)
-// v1.3.1
+// v1.3.2
+const JOOP_VERSION = "1.3.2";
 
 const language = "nl";
 
@@ -54,7 +55,7 @@ function getSendButton() {
 const PHASE = {
   IDLE: "idle",
   INTENT: "intent",
-  PROPOSAL: "proposal",      // voorstel-flow in meerdere microstappen
+  PROPOSAL: "proposal",      // voorstel-flow in microstappen
   COLLECT: "collect",        // details verzamelen
   VALIDATE: "validate",
   CONCEPT: "concept",
@@ -69,7 +70,7 @@ const state = {
   intent: null,              // koop_spullen
   objectDetected: null,      // fiets, laptop, ...
   didAssumptiveIntro: false,
-  proposalStep: 0,           // 0=assumptie, 1=keuzevraag, daarna naar COLLECT
+  proposalStep: 0,           // 0=assumptie, 1=keuzevraag
   fields: {},                // ingevulde velden
   sources: {},               // bron per veld (user | ai-proposed)
   lastAsked: null            // laatst gevraagde veldpad
@@ -196,14 +197,12 @@ function normalizeMoney(s) {
 }
 function parseDutchDate(s) {
   if (!s) return null;
-  // dd-mm-yyyy of dd/mm/yyyy
   const m1 = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
   if (m1) {
     const d = Number(m1[1]), mo = Number(m1[2]), y = Number(m1[3]);
     const iso = `${y.toString().padStart(4,"0")}-${mo.toString().padStart(2,"0")}-${d.toString().padStart(2,"0")}`;
     if (!isNaN(Date.parse(iso))) return iso;
   }
-  // yyyy-mm-dd
   if (!isNaN(Date.parse(s))) return s;
   return null;
 }
@@ -277,8 +276,8 @@ function parseHumanDateNL(text, now = new Date()) {
   }
 
   // 12-10 / 12/10 (zonder jaar → dit jaar, of volgend jaar als voorbij)
-  let m2;
-  if (m2 = t.match(/\b(\d{1,2})[-/](\d{1,2})(?:[-/](\d{4}))?\b/)) {
+  const m2 = t.match(/\b(\d{1,2})[-/](\d{1,2})(?:[-/](\d{4}))?\b/);
+  if (m2) {
     const d = parseInt(m2[1],10), mo = parseInt(m2[2],10)-1, y = m2[3] ? parseInt(m2[3],10) : today.getFullYear();
     let cand = new Date(y, mo, d);
     if (!m2[3] && cand < today) cand = new Date(y+1, mo, d);
@@ -321,29 +320,20 @@ function nearestCourt(woonplaats) {
 // ====== 8) Validatie ======
 function validateFields(fields) {
   const errs = [];
+  for (const path of schema.required) if (!get(fields, path)) errs.push(`Ontbrekend: ${path}`);
 
-  // vereiste velden
-  for (const path of schema.required) {
-    if (!get(fields, path)) errs.push(`Ontbrekend: ${path}`);
-  }
-
-  // prijs
   const bedrag = parseFloat(get(fields, "prijs.bedrag"));
   if (isNaN(bedrag) || bedrag <= 0) errs.push("Prijs moet een positief bedrag zijn.");
 
-  // datum
   const dat = get(fields, "levering.datum");
   if (dat && isNaN(Date.parse(dat))) errs.push("Leveringsdatum is ongeldig (bijv. “morgen” of 12-10-2025).");
 
-  // forum: woonplaats → rechtbank
   const woon = get(fields, "forum.woonplaats_gebruiker");
   if (woon && !get(fields, "forum.rechtbank")) {
     set(fields, "forum.rechtbank", nearestCourt(woon));
   }
 
-  // vast recht
   set(fields, "recht.toepasselijk", schema.fixed["recht.toepasselijk"]);
-
   return errs;
 }
 function get(obj, path) {
@@ -395,7 +385,60 @@ ${f("verkoper.naam","Verkoper")} – datum handtekening: _____________________
   ].join("\n");
 }
 
-// ====== 10) Gesprekslogica (router) ======
+// ====== 10) Bulkformulier-parser (alles in één bericht) ======
+function parseBulkForm(text) {
+  const map = {
+    "koper": "koper.naam",
+    "verkoper": "verkoper.naam",
+    "omschrijving": "object.omschrijving",
+    "object": "object.omschrijving",
+    "conditie": "object.conditie",
+    "serienummer": "object.identifiers",
+    "frame": "object.identifiers",
+    "identificatie": "object.identifiers",
+    "prijs": "prijs.bedrag",
+    "bedrag": "prijs.bedrag",
+    "betaling": "betaling.wijze",
+    "betaalmoment": "betaling.moment",
+    "levering": "levering",              // speciale behandeling (datum + plaats)
+    "datum": "levering.datum",
+    "plaats": "levering.plaats",
+    "woonplaats": "forum.woonplaats_gebruiker",
+    "forum": "forum.woonplaats_gebruiker"
+  };
+  const kv = {};
+  const lines = text.split(/\r?\n|[;|]/).map(s => s.trim()).filter(Boolean);
+  for (let line of lines) {
+    const m = line.match(/^([\w .\-]+)\s*[:=\-]\s*(.+)$/i);
+    if (!m) continue;
+    let key = m[1].toLowerCase().trim().replace(/\s+/g, "");
+    let val = m[2].trim();
+    if (!(key in map)) continue;
+
+    const path = map[key];
+    if (path === "prijs.bedrag") {
+      const mm = val.toLowerCase().match(/(?:€\s*|eur(?:o)?\s*)?(\d{1,7}(?:[.,]\d{2})?)/i);
+      if (mm) kv["prijs.bedrag"] = mm[1].replace(/\./g,"").replace(",",".");
+      continue;
+    }
+    if (path === "levering") {
+      const d = parseHumanDateNL(val) || parseDutchDate(val);
+      if (d) kv["levering.datum"] = d;
+      const p = val.match(/\b(?:in|te)\s+([A-ZÁÉÍÓÚÄËÏÖÜ][\w\- ]{2,})/);
+      if (p) kv["levering.plaats"] = p[1].trim();
+      continue;
+    }
+    if (path === "levering.datum") {
+      const d = parseHumanDateNL(val) || parseDutchDate(val);
+      if (d) kv["levering.datum"] = d;
+      continue;
+    }
+    kv[path] = val;
+  }
+  return kv;
+}
+
+// ====== 11) Gesprekslogica (router) ======
 function handleLocal(userMsg) {
   // guard: verwerk max 1x per turn
   if (lastHandledTurn === turnCounter) return true;
@@ -410,7 +453,6 @@ function handleLocal(userMsg) {
       state.didAssumptiveIntro = true;
       state.proposalStep = 0;
 
-      // (0) Eerste beurt: alleen assumptie
       addAiMessageMarkdown(
         `Ik ga uit van een **koopovereenkomst voor spullen (roerende zaak)**, omdat ${cls.object ? `het om een ${cls.object} gaat` : "het om de aankoop van spullen lijkt te gaan"}.`
       );
@@ -421,7 +463,6 @@ function handleLocal(userMsg) {
 
   // 2) PROPOSAL microstappen
   if (state.phase === PHASE.PROPOSAL) {
-    // step 0 → 1: vraag pas nu naar mode
     if (state.proposalStep === 0) {
       state.proposalStep = 1;
       addAiMessageMarkdown(
@@ -429,13 +470,20 @@ function handleLocal(userMsg) {
       );
       return true;
     }
-
-    // step 1: verwerk keuze (of default) en ga naar omschrijving
     if (state.proposalStep === 1) {
       const mode = parseMode(userMsg);
       state.mode = mode || MODE.CHAT;
 
-      // Nu pas het omschrijvingsvoorstel
+      if (state.mode === MODE.FORM) {
+        addAiMessageMarkdown(
+          `Top — stuur alles **in één bericht** zoals:\n` +
+          `koper: Jan Jansen\nverkoper: Piet Pieters\nomschrijving: Cortina stadsfiets, zwart, 2022\nprijs: €350\nlevering: morgen in Leiden\nwoonplaats: Wassenaar`
+        );
+        state.phase = PHASE.COLLECT;
+        state.lastAsked = null;
+        return true;
+      }
+
       const suggestion = suggestionFor(state.objectDetected);
       addAiMessageMarkdown(
         `Zal ik alvast een **omschrijving** voorstellen?\n**Voorstel:** “${suggestion}”.\n**Past dit ongeveer?** Zo niet, noem merk/kleur/jaar/conditie.`
@@ -446,8 +494,33 @@ function handleLocal(userMsg) {
     }
   }
 
-  // 3) COLLECT: vraag-voor-vraag velden verzamelen
+  // 3) COLLECT
   if (state.phase === PHASE.COLLECT) {
+    // Eerst: bulkbericht?
+    const looksBulk = (state.mode === MODE.FORM) || /:\s*\S/.test(userMsg) || userMsg.includes("\n");
+    if (looksBulk) {
+      const bulk = parseBulkForm(userMsg);
+      const keys = Object.keys(bulk);
+      if (keys.length) {
+        for (const k of keys) { set(state.fields, k, bulk[k]); state.sources[k] = "user"; }
+        const missing = requiredMissing();
+        if (missing.length === 0) {
+          state.phase = PHASE.VALIDATE;
+          const errs = validateFields(state.fields);
+          if (errs.length) {
+            addAiMessageMarkdown("Even checken:\n" + errs.map(e=>`- ${e}`).join("\n") + "\n\nNoem alsjeblieft de ontbrekende/onjuiste gegevens.");
+            state.phase = PHASE.COLLECT;
+          } else {
+            state.phase = PHASE.CONCEPT;
+            const concept = buildConcept(state.fields);
+            addAiMessageMarkdown(concept + "\n\n*Nog iets aanpassen? Typ het gewoon.*");
+            state.phase = PHASE.DONE;
+          }
+          return true;
+        }
+      }
+    }
+
     // Als we net om omschrijving vroegen en user zegt "ja/klopt", neem voorstel over
     if (state.lastAsked === "object.omschrijving" && /^(ja|klopt|prima|ok|oke|okay)\b/i.test(userMsg)) {
       if (!get(state.fields,"object.omschrijving")) {
@@ -457,14 +530,14 @@ function handleLocal(userMsg) {
       }
     }
 
-    // verwerk user input → velden (prijs, datum, plaats, woonplaats, etc.)
+    // verwerk user input → velden
     const extracted = extractFields(userMsg);
     for (const k of Object.keys(extracted)) {
       set(state.fields, k, extracted[k]);
       state.sources[k] = "user";
     }
 
-    // Namen expliciet herkennen (flexibeler)
+    // Namen expliciet herkennen
     const koperMatch = userMsg.match(/\bkoper(?:\s+is)?[:\-]?\s+([A-Z][^\n\r,.;]{1,80})/i);
     if (koperMatch) {
       set(state.fields, "koper.naam", koperMatch[1].trim().replace(/[”"']+$/,"").trim());
@@ -491,19 +564,11 @@ function handleLocal(userMsg) {
     // Als expliciet om een naam is gevraagd, accepteer "Voornaam Achternaam"
     if (state.lastAsked === "koper.naam" && !get(state.fields,"koper.naam")) {
       const m = userMsg.trim().match(/^[A-ZÁÉÍÓÚÄËÏÖÜ][\w'’\-]+(?:\s+[A-ZÁÉÍÓÚÄËÏÖÜ][\w'’\-]+){0,3}$/);
-      if (m) {
-        set(state.fields,"koper.naam", m[0].trim());
-        state.sources["koper.naam"] = "user";
-        state.lastAsked = null;
-      }
+      if (m) { set(state.fields,"koper.naam", m[0].trim()); state.sources["koper.naam"]="user"; state.lastAsked=null; }
     }
     if (state.lastAsked === "verkoper.naam" && !get(state.fields,"verkoper.naam")) {
       const m = userMsg.trim().match(/^[A-ZÁÉÍÓÚÄËÏÖÜ][\w'’\-]+(?:\s+[A-ZÁÉÍÓÚÄËÏÖÜ][\w'’\-]+){0,3}$/);
-      if (m) {
-        set(state.fields,"verkoper.naam", m[0].trim());
-        state.sources["verkoper.naam"] = "user";
-        state.lastAsked = null;
-      }
+      if (m) { set(state.fields,"verkoper.naam", m[0].trim()); state.sources["verkoper.naam"]="user"; state.lastAsked=null; }
     }
 
     // Vraag volgende of ga valideren
@@ -523,22 +588,19 @@ function handleLocal(userMsg) {
         return true;
       }
     } else {
-      // stel de volgende, korte vraag
       addAiMessageMarkdown(nextQuestion());
       return true;
     }
   }
 
-  // 4) DONE: bewerkingen/aanpassingen
+  // 4) DONE
   if (state.phase === PHASE.DONE) {
-    // aanpassingen oppakken
     const extracted = extractFields(userMsg);
     for (const k of Object.keys(extracted)) {
       set(state.fields, k, extracted[k]);
       state.sources[k] = "user";
     }
 
-    // simpele naam-wijzigers
     if (/^koper[:\-]\s*/i.test(userMsg)) {
       set(state.fields,"koper.naam", userMsg.replace(/^koper[:\-]\s*/i,"").trim());
       state.sources["koper.naam"] = "user";
@@ -554,7 +616,6 @@ function handleLocal(userMsg) {
       state.sources["forum.woonplaats_gebruiker"] = "user";
     }
 
-    // herbouw concept
     const errors = validateFields(state.fields);
     if (errors.length) {
       addAiMessageMarkdown("Kleine controle:\n" + errors.map(e=>`- ${e}`).join("\n") + "\n\nPas dit aan en ik werk het concept direct bij.");
@@ -566,7 +627,7 @@ function handleLocal(userMsg) {
     }
   }
 
-  return false; // niet lokaal afgehandeld
+  return false;
 }
 
 function requiredMissing() {
@@ -576,7 +637,6 @@ function requiredMissing() {
 }
 
 function nextQuestion() {
-  // in logische volgorde vragen wat nog ontbreekt
   if (!get(state.fields,"object.omschrijving")) {
     const base = suggestionFor(state.objectDetected);
     state.lastAsked = "object.omschrijving";
@@ -606,7 +666,6 @@ function nextQuestion() {
     state.lastAsked = "forum.woonplaats_gebruiker";
     return `Wat is je **woonplaats** (of postcode) voor de forumkeuze (dichtstbijzijnde rechtbank)?`;
   }
-
   state.lastAsked = null;
   return `Dank! Ik controleer even alles en toon dan het **concept**.`;
 }
@@ -625,21 +684,18 @@ async function sendMessage() {
   addUserMessage(userMessage);
   inputField.value = "";
 
-  // Probeer lokaal af te handelen (onze 10-stappenflow)
   const handled = handleLocal(userMessage);
   if (handled) {
     lastHandledTurn = myTurn;
     return;
   }
 
-  // Zo niet: val terug op backend (optioneel / toekomstig)
   inputField.disabled = true;
   if (sendButton) {
     sendButton.disabled = true;
     sendButton.innerHTML = `<span class="spinner"></span> ${textLabels[language].sending}`;
   }
 
-  // Typ-indicator
   const typingIndicator = document.createElement("div");
   typingIndicator.classList.add("message", "ai");
   typingIndicator.id = "typing-indicator";
@@ -690,17 +746,13 @@ window.addEventListener("DOMContentLoaded", function () {
   const input = document.getElementById("user-input");
   const sendButton = getSendButton();
 
-  // cache labels
   input.placeholder = textLabels[language].placeholder;
-  if (sendButton) sendButton.textContent = textLabels[language].send;
-
-  // verwijder inline onclick (voorkomt dubbele calls) en bind JS-click
   if (sendButton) {
+    sendButton.textContent = textLabels[language].send;
     sendButton.onclick = null; // kill inline onclick als die bestond
     sendButton.addEventListener("click", sendMessage, { once: false });
   }
 
-  // Enter-to-send
   input.addEventListener("keydown", function (event) {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -709,5 +761,5 @@ window.addEventListener("DOMContentLoaded", function () {
   });
 
   input.focus();
-  // Geen onboarding — we wachten op de eerste user input
+  console.log("JoopJurist v" + JOOP_VERSION);
 });
