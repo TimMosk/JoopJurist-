@@ -1,6 +1,6 @@
 // /api/chat.js — JoopJurist backend (Vercel/Node serverless)
 // Vereist: OPENAI_API_KEY in je environment (Vercel dashboard of lokaal .env)
-
+export const config = { runtime: "nodejs" };
 import OpenAI from "openai";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
