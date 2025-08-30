@@ -1,11 +1,14 @@
 // /api/chat.js — JoopJurist backend (Vercel/Node serverless)
 // Vereist: OPENAI_API_KEY in je environment (Vercel dashboard of lokaal .env)
-export const config = { runtime: "nodejs" };
-import OpenAI from "openai";
 
+// 0) Runtime MOET bovenaan
+export const config = { runtime: "nodejs" };
+
+// 1) Imports + OpenAI client
+import OpenAI from "openai";
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// ---------- Mini clause-catalogus (ingebed) ----------
+// 2) Mini clause-catalogus
 const CATALOG = [
   {
     id: "eigendom_diefstal",
@@ -66,15 +69,14 @@ const CATALOG = [
   }
 ];
 
-// ---------- Kleine util-functies ----------
+// 3) Utils
 const PH = "*[●nader aan te vullen●]*";
-
 const get = (o,p)=>p.split(".").reduce((x,k)=>x&&x[k],o);
 function set(obj, p, val){ const a=p.split("."); let o=obj; for(let i=0;i<a.length-1;i++){ if(!o[a[i]]) o[a[i]]={}; o=o[a[i]]; } o[a[a.length-1]]=val; }
-function mergeFacts(oldF={}, newF={}){ const out=JSON.parse(JSON.stringify(oldF)); (function rec(s,pre=""){ for(const k of Object.keys(s)){ const v=s[k], path=pre?`${pre}.${k}`:k; if(v&&typeof v==="object"&&!Array.isArray(v)){ if(!get(out,path)) set(out,path,{}); rec(v,path);} else { set(out,path,v);} } })(newF); return out; }
+function mergeFacts(oldF={}, newF={}){ const out=JSON.parse(JSON.stringify(oldF)); (function rec(s,pre=""){ for(const k of Object.keys(s||{})){ const v=s[k], path=pre?`${pre}.${k}`:k; if(v&&typeof v==="object"&&!Array.isArray(v)){ if(!get(out,path)) set(out,path,{}); rec(v,path);} else { set(out,path,v);} } })(newF); return out; }
 
 function nearestCourt(place=""){
-  const s = place.toLowerCase();
+  const s = (place||"").toLowerCase();
   const map = [
     [/den haag|wassenaar|leiden|delft|zoetermeer|scheveningen|voorburg/, "Rechtbank Den Haag"],
     [/amsterdam|amstelveen|diemen|zaandam|hoofddorp|haarlem/, "Rechtbank Amsterdam / Noord-Holland"],
@@ -124,7 +126,7 @@ function deriveFlags(facts, lastUserMsg=""){
   const payInParts = /termijn|in delen|gespreid|betaling in delen/i.test(lastUserMsg);
   return { price, shipping, payInParts };
 }
-function fillTemplate(tpl, facts, vars={}){
+function fillTemplate(tpl, facts, vars={}) {
   return tpl.replace(/\{\{([^}|]+)(?:\|([^}]*))?\}\}/g, (_, path, fb) => {
     const v = get(facts, path.trim());
     if (v != null && String(v).trim() !== "") return String(v);
@@ -162,50 +164,85 @@ function parseSuggestionSelection(userMsg="", suggestions=[]){
   return suggestions.filter(s => picks.has(s.id));
 }
 
-// ---------- LLM orchestration ----------
+// 4) Normaliseer say/ask (vraag alleen in ask)
+function normalizeSayAsk(llm) {
+  if (!llm) return;
+
+  // Als er een vraag in 'say' zit, verplaats die naar 'ask'
+  if (llm.say && llm.say.includes("?")) {
+    const idx = llm.say.lastIndexOf("?");
+    const before = llm.say.slice(0, idx).trim();
+    const q = llm.say.slice(idx).trim();
+    llm.say = before.replace(/[–—-]\s*$/, "").trim();
+    if (!llm.ask) {
+      const cleaned = q.replace(/^[?.!\s-]+/, "").trim();
+      if (cleaned) llm.ask = cleaned.endsWith("?") ? cleaned : cleaned + "?";
+    }
+  }
+
+  // Als ask leeg of duplicaat is, maak 'm null
+  if (llm.ask) {
+    const norm = s => (s || "").replace(/\W+/g, "").toLowerCase();
+    if (!llm.ask.trim() || norm(llm.ask) === norm(llm.say)) {
+      llm.ask = null;
+    }
+  }
+}
+
+// 5) Prompt + LLM-call (JSON afdwingen)
 const SYSTEM_PROMPT = `
-Je bent "JoopJurist", een Nederlandse jurist met heel veel ervaring in het adviseren van consumenten en kleine bedrijven. Doel: help bij koopovereenkomst voor spullen (roerende zaak) in natuurlijk Nederlands.
-Regels:
-- Leid feiten af uit vrije tekst (koper/verkoper, object, prijs, leveringsdatum/plaats, woonplaats gebruiker).
-- Max 1 korte vervolgvraag per beurt.
-- Toepasselijk recht = Nederlands recht. Forumkeuze = dichtstbijzijnde rechtbank bij woonplaats van gebruiker.
-- Adviseer 1–3 aanvullende bepalingen (title/why/clause) wanneer gepast.
-- Antwoord altijd als JSON met exact:
+Je bent "JoopJurist", een Nederlandse jurist met veel ervaring. Doel: help bij koopovereenkomst voor spullen (roerende zaak) in natuurlijk Nederlands.
+
+STIJL:
+- "say" = 1–2 korte, vriendelijke zinnen (samenvatting/acknowledgement). **Geen vraag** in "say".
+- Heb je een vraag? Zet **exact één korte vraag in "ask"**. Herhaal de vraag niet in "say".
+- Geef **geen suggesties in de allereerste beurt**. Stel 1–3 suggesties alleen voor als de gebruiker erom vraagt of als er al wat feiten bekend zijn.
+- Altijd Nederlands; datums liefst ISO (YYYY-MM-DD).
+
+JURIDISCH:
+- Toepasselijk recht = Nederlands recht.
+- Forumkeuze = dichtstbijzijnde rechtbank bij woonplaats van gebruiker (leid af of vraag 1×).
+
+OUTPUT (STRICT JSON, zonder extra tekst):
 {"say": string, "facts": object, "ask": string|null, "suggestions": [{"id": string, "title": string, "why": string, "clause": string}]|[], "concept": null, "done": boolean}
-- Zet niets buiten het JSON.
-- Vul "facts" alleen met wat je redelijk zeker weet; datums bij voorkeur ISO (YYYY-MM-DD).
 `;
 
-async function callLLM({facts, history, message}){
+async function callLLM({facts, history, message}) {
   const messages = [
     { role:"system", content: SYSTEM_PROMPT },
     ...(history || []).slice(-8),
     { role:"user", content: JSON.stringify({ message, facts }) }
   ];
+
   const resp = await openai.chat.completions.create({
     model: process.env.OPENAI_MODEL || "gpt-4o",
     temperature: 0.3,
-    messages
+    messages,
+    // 🔒 Dwing zuiver JSON af
+    response_format: { type: "json_object" }
   });
+
   const raw = resp.choices?.[0]?.message?.content || "{}";
-  const json = (() => { const m = raw.match(/```json\s*([\s\S]*?)```/i); return (m ? m[1] : raw).trim(); })();
-  try { return JSON.parse(json); }
-  catch { return { say:"Sorry, ik kon dit niet goed verwerken.", facts, ask:"Wil je het anders formuleren?", suggestions:[], concept:null, done:false }; }
+  try { return JSON.parse(raw); }
+  catch {
+    // Fallback (zou zelden nodig zijn)
+    return { say:"Sorry, ik kon dit niet goed verwerken.", facts, ask:"Wil je het anders formuleren?", suggestions:[], concept:null, done:false };
+  }
 }
 
-// ---------- API handler ----------
+// 6) API handler
 export default async function handler(req, res) {
   try{
     if (req.method !== "POST") return res.status(405).json({ error: "Use POST" });
-
-    // ✅ duidelijke fout als de key ontbreekt
     if (!process.env.OPENAI_API_KEY) {
       return res.status(500).json({ error: "Missing OPENAI_API_KEY" });
     }
 
     const { message="", facts: clientFacts={}, history=[] } = req.body || {};
-    
+
+    // LLM-analyse
     const llm = await callLLM({ facts: clientFacts, history, message });
+    normalizeSayAsk(llm);
 
     // Merge + vaste rechtsbasis + rechtbank
     let facts = mergeFacts(clientFacts, llm.facts || {});
@@ -214,18 +251,25 @@ export default async function handler(req, res) {
       set(facts,"forum.rechtbank", nearestCourt(get(facts,"forum.woonplaats_gebruiker")));
     }
 
-    // Catalog-suggesties
-    let suggestions = pickCatalogSuggestions(facts, message);
-    if (Array.isArray(llm.suggestions) && llm.suggestions.length){
-      const combined = [...suggestions];
-      for (const s of llm.suggestions) {
-        if (!combined.find(x => x.id === s.id) && combined.length < 3) combined.push(s);
+    // Bepaal missende velden (nu al nodig voor gating)
+    const missing = missingKeys(facts);
+
+    // Gate voor suggesties: niet in beurt 1, tenzij gevraagd; of als er al wat context is en er niet te veel mist
+    const userAskedForSugg = /\b(suggest|advies|aanvull|clausul|extra|neem\s+\d)/i.test(message);
+    let suggestions = [];
+    const allowSuggestions = userAskedForSugg || ((history && history.length > 0) && missing.length <= 3);
+    if (allowSuggestions) {
+      suggestions = pickCatalogSuggestions(facts, message);
+      if (Array.isArray(llm.suggestions) && llm.suggestions.length){
+        const combined = [...suggestions];
+        for (const s of llm.suggestions) {
+          if (!combined.find(x => x.id === s.id) && combined.length < 3) combined.push(s);
+        }
+        suggestions = combined;
       }
-      suggestions = combined;
     }
 
     // Concept beslissen
-    const missing = missingKeys(facts);
     const userWants = wantsDraft(message);
     let concept = null;
     let done = false;
@@ -249,7 +293,7 @@ export default async function handler(req, res) {
       concept += `\n${extra}`;
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       say: llm.say || "Helder.",
       facts,
       ask: llm.ask || null,
@@ -258,7 +302,7 @@ export default async function handler(req, res) {
       done
     });
 
-   } catch (err) {
+  } catch (err) {
     console.error("api/chat error:", err);
     return res.status(500).json({
       error: "Server error",
@@ -267,11 +311,11 @@ export default async function handler(req, res) {
   }
 }
 
-// ---------- Concept renderer ----------
+// 7) Concept renderer
 function renderConcept(f, usePH){
   const v = p => get(f,p) || (usePH ? PH : "");
   const bedrag = get(f,"prijs.bedrag");
-  const prijsStr = bedrag
+  const prijsStr = (bedrag != null && String(bedrag).trim() !== "")
     ? `€ ${Number(bedrag).toLocaleString("nl-NL",{minimumFractionDigits:2, maximumFractionDigits:2})}`
     : (usePH ? PH : "€ …");
   const forum = get(f,"forum.rechtbank") || (usePH ? PH : "dichtstbijzijnde rechtbank bij woonplaats koper");
