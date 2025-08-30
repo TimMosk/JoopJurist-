@@ -183,7 +183,7 @@ async function callLLM({facts, history, message}){
     { role:"user", content: JSON.stringify({ message, facts }) }
   ];
   const resp = await openai.chat.completions.create({
-    model: "gpt-4o",
+    model: process.env.OPENAI_MODEL || "gpt-4o",
     temperature: 0.3,
     messages
   });
@@ -198,8 +198,13 @@ export default async function handler(req, res) {
   try{
     if (req.method !== "POST") return res.status(405).json({ error: "Use POST" });
 
-    const { message="", facts: clientFacts={}, history=[] } = req.body || {};
+    // ✅ duidelijke fout als de key ontbreekt
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(500).json({ error: "Missing OPENAI_API_KEY" });
+    }
 
+    const { message="", facts: clientFacts={}, history=[] } = req.body || {};
+    
     const llm = await callLLM({ facts: clientFacts, history, message });
 
     // Merge + vaste rechtsbasis + rechtbank
@@ -253,9 +258,12 @@ export default async function handler(req, res) {
       done
     });
 
-  }catch(err){
-    console.error(err);
-    res.status(500).json({ error: "Server error" });
+   } catch (err) {
+    console.error("api/chat error:", err);
+    return res.status(500).json({
+      error: "Server error",
+      details: err?.message || String(err)
+    });
   }
 }
 
