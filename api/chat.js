@@ -1,54 +1,299 @@
-const MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
+// /api/chat.js — JoopJurist backend (Vercel/Node serverless)
+// Vereist: OPENAI_API_KEY in je environment (Vercel dashboard of lokaal .env)
 
-export default async function handler(req, res) {
-  const apiKey = process.env.OPENAI_API_KEY;
+import OpenAI from "openai";
 
-  if (req.method !== 'POST') {
-    return res.status(405).json({ message: 'Alleen POST-requests zijn toegestaan.' });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// ---------- Mini clause-catalogus (ingebed) ----------
+const CATALOG = [
+  {
+    id: "eigendom_diefstal",
+    title: "Eigendom & geen diefstal",
+    why: "Voorkomt problemen als het object gestolen blijkt.",
+    clause:
+      "Verkoper verklaart eigenaar te zijn en dat het object niet als gestolen geregistreerd staat. Bij onjuistheid mag koper de overeenkomst ontbinden en ontvangt hij de koopprijs terug.",
+    when: { category: ["fiets","telefoon","laptop","camera","instrument","overig"], min_price: 200 }
+  },
+  {
+    id: "identificatie_fiets",
+    title: "Framenummer & sleutels (fiets)",
+    why: "Maakt de fiets identificeerbaar en afspraken over sleutels duidelijk.",
+    clause:
+      "Identificatie: framenummer {{object.identifiers|*[●nader aan te vullen●]*}}. Verkoper levert bij levering {{keys_count|2}} sleutels over.",
+    when: { category: ["fiets"] },
+    vars: { keys_count: 2 }
+  },
+  {
+    id: "proefrit_gebreken",
+    title: "Proefrit/inspectie & verborgen gebreken",
+    why: "Legt de staat vast en beperkt discussies achteraf.",
+    clause:
+      "Koper heeft het object kunnen inspecteren/proefrijden op {{inspectiedatum|*[●nader aan te vullen●]*}} en accepteert de zichtbare staat. Verborgen gebreken die verkoper kende blijven voor rekening van verkoper.",
+    when: { category: ["fiets","laptop","telefoon","camera","instrument","overig"] }
+  },
+  {
+    id: "accountvrij_imei",
+    title: "Accountvrij & IMEI (telefoon)",
+    why: "Voorkomt lock-problemen en controleert herkomst.",
+    clause:
+      "Verkoper garandeert dat het toestel niet iCloud/Google-gelockt is en dat de IMEI {{object.identifiers|*[●nader aan te vullen●]*}} niet als gestolen geregistreerd staat.",
+    when: { category: ["telefoon"] }
+  },
+  {
+    id: "licentie_privacy",
+    title: "Licentie & dataveilig wissen (laptop)",
+    why: "Regelt legitieme software en privacybescherming.",
+    clause:
+      "Meegeleverd: geldige licentie {{software_licentie|*[●nader aan te vullen●]*}}. Verkoper verwijdert alle persoonlijke data en accounts vóór levering (factory reset).",
+    when: { category: ["laptop"] }
+  },
+  {
+    id: "transport_risico",
+    title: "Transport & risico bij verzending",
+    why: "Legt vast wie het risico draagt tijdens verzending.",
+    clause:
+      "Bij verzending gaat het risico op verlies of beschadiging over bij aflevering op het bezorgadres. Partijen spreken af dat {{verzendkosten_betaler|koper}} de verzendkosten en eventuele verzekering betaalt.",
+    when: { shipping: true }
+  },
+  {
+    id: "eigendomsvoorbehoud",
+    title: "Eigendom pas na volledige betaling",
+    why: "Geeft zekerheid aan de verkoper bij betaling in termijnen.",
+    clause:
+      "Eigendom gaat pas over na volledige betaling van de koopprijs; tot dat moment mag koper het object niet verkopen of bezwaren.",
+    when: { pay_in_parts: true }
   }
+];
 
-  try {
-    const { message } = req.body;
+// ---------- Kleine util-functies ----------
+const PH = "*[●nader aan te vullen●]*";
 
-    if (!message || typeof message !== 'string') {
-      return res.status(400).json({ error: 'Bericht ontbreekt of is ongeldig.' });
+const get = (o,p)=>p.split(".").reduce((x,k)=>x&&x[k],o);
+function set(obj, p, val){ const a=p.split("."); let o=obj; for(let i=0;i<a.length-1;i++){ if(!o[a[i]]) o[a[i]]={}; o=o[a[i]]; } o[a[a.length-1]]=val; }
+function mergeFacts(oldF={}, newF={}){ const out=JSON.parse(JSON.stringify(oldF)); (function rec(s,pre=""){ for(const k of Object.keys(s)){ const v=s[k], path=pre?`${pre}.${k}`:k; if(v&&typeof v==="object"&&!Array.isArray(v)){ if(!get(out,path)) set(out,path,{}); rec(v,path);} else { set(out,path,v);} } })(newF); return out; }
+
+function nearestCourt(place=""){
+  const s = place.toLowerCase();
+  const map = [
+    [/den haag|wassenaar|leiden|delft|zoetermeer|scheveningen|voorburg/, "Rechtbank Den Haag"],
+    [/amsterdam|amstelveen|diemen|zaandam|hoofddorp|haarlem/, "Rechtbank Amsterdam / Noord-Holland"],
+    [/rotterdam|schiedam|capelle|spijkenisse|dordrecht/, "Rechtbank Rotterdam"],
+    [/utrecht|hilversum|amersfoort|leusden|nieuwegein|zeist/, "Rechtbank Midden-Nederland (Utrecht)"],
+    [/eindhoven|s-?hertogenbosch|den bosch|helmond/, "Rechtbank Oost-Brabant"],
+    [/breda|tilburg|roosendaal/, "Rechtbank Zeeland-West-Brabant"],
+    [/groningen|assen|leeuwarden/, "Rechtbank Noord-Nederland"],
+    [/zwolle|enschede|deventer|almelo/, "Rechtbank Overijssel"],
+    [/arnhem|nijmegen|apeldoorn|zutphen|ede|wageningen/, "Rechtbank Gelderland"],
+    [/maastricht|heerlen|sittard|venlo|roermond/, "Rechtbank Limburg"]
+  ];
+  for (const [rx,c] of map) if (rx.test(s)) return c;
+  return "Rechtbank Den Haag";
+}
+
+const REQUIRED = [
+  "koper.naam","verkoper.naam",
+  "object.omschrijving","prijs.bedrag",
+  "levering.datum","levering.plaats"
+];
+const missingKeys = f => REQUIRED.filter(k => !get(f,k));
+const prettyLabel = k => ({
+  "koper.naam":"naam van de koper",
+  "verkoper.naam":"naam van de verkoper",
+  "object.omschrijving":"omschrijving van het object",
+  "prijs.bedrag":"koopprijs",
+  "levering.datum":"leveringsdatum",
+  "levering.plaats":"leveringsplaats"
+}[k] || k);
+
+const wantsDraft = msg => /toon (alvast )?(het )?concept|laat .*concept|geef .*concept|concept graag|opzet|voorbeeld|draft/i.test(msg||"");
+
+function detectCategory(facts){
+  const s = (facts?.object?.omschrijving || "").toLowerCase();
+  if (/fiets|e-bike|racefiets|mtb|bakfiets|mountainbike/.test(s)) return "fiets";
+  if (/laptop|notebook|macbook|computer|pc/.test(s)) return "laptop";
+  if (/telefoon|smartphone|iphone|samsung/.test(s)) return "telefoon";
+  if (/camera|canon|nikon|sony|fujifilm/.test(s)) return "camera";
+  if (/gitaar|piano|keyboard|viool|drum/.test(s)) return "instrument";
+  return "overig";
+}
+function deriveFlags(facts, lastUserMsg=""){
+  const price = Number(facts?.prijs?.bedrag || 0);
+  const shipping = /verzend|bezorg|opsturen|pakket|postnl|dhl/i.test(lastUserMsg)
+                 || /bezorg|aflever/i.test(facts?.levering?.plaats || "");
+  const payInParts = /termijn|in delen|gespreid|betaling in delen/i.test(lastUserMsg);
+  return { price, shipping, payInParts };
+}
+function fillTemplate(tpl, facts, vars={}){
+  return tpl.replace(/\{\{([^}|]+)(?:\|([^}]*))?\}\}/g, (_, path, fb) => {
+    const v = get(facts, path.trim());
+    if (v != null && String(v).trim() !== "") return String(v);
+    if (vars && vars[path.trim()] != null) return String(vars[path.trim()]);
+    return fb != null ? fb : PH;
+  });
+}
+function pickCatalogSuggestions(facts, lastUserMsg=""){
+  const cat = detectCategory(facts);
+  const { price, shipping, payInParts } = deriveFlags(facts, lastUserMsg);
+  const matches = CATALOG.filter(it => {
+    const w = it.when || {};
+    if (w.category && !w.category.includes(cat)) return false;
+    if (w.min_price && price < w.min_price) return false;
+    if (w.shipping === true && !shipping) return false;
+    if (w.pay_in_parts === true && !payInParts) return false;
+    return true;
+  });
+  return matches.slice(0,3).map(it => ({
+    id: it.id, title: it.title, why: it.why,
+    clause: fillTemplate(it.clause, facts, it.vars || {})
+  }));
+}
+function parseSuggestionSelection(userMsg="", suggestions=[]){
+  const picks = new Set();
+  const m = userMsg.match(/\bneem\b([^.]*)/i);
+  if (m) {
+    const nums = (m[1].match(/\d+/g) || []).map(n => Number(n)-1);
+    nums.forEach(ix => suggestions[ix] && picks.add(suggestions[ix].id));
+  }
+  suggestions.forEach(s => {
+    const kw = (s.id || s.title).split(/\W+/)[0];
+    if (new RegExp(kw,"i").test(userMsg)) picks.add(s.id);
+  });
+  return suggestions.filter(s => picks.has(s.id));
+}
+
+// ---------- LLM orchestration ----------
+const SYSTEM_PROMPT = `
+Je bent "JoopJurist", een Nederlandse jurist met heel veel ervaring in het adviseren van consumenten en kleine bedrijven. Doel: help bij koopovereenkomst voor spullen (roerende zaak) in natuurlijk Nederlands.
+Regels:
+- Leid feiten af uit vrije tekst (koper/verkoper, object, prijs, leveringsdatum/plaats, woonplaats gebruiker).
+- Max 1 korte vervolgvraag per beurt.
+- Toepasselijk recht = Nederlands recht. Forumkeuze = dichtstbijzijnde rechtbank bij woonplaats van gebruiker.
+- Adviseer 1–3 aanvullende bepalingen (title/why/clause) wanneer gepast.
+- Antwoord altijd als JSON met exact:
+{"say": string, "facts": object, "ask": string|null, "suggestions": [{"id": string, "title": string, "why": string, "clause": string}]|[], "concept": null, "done": boolean}
+- Zet niets buiten het JSON.
+- Vul "facts" alleen met wat je redelijk zeker weet; datums bij voorkeur ISO (YYYY-MM-DD).
+`;
+
+async function callLLM({facts, history, message}){
+  const messages = [
+    { role:"system", content: SYSTEM_PROMPT },
+    ...(history || []).slice(-8),
+    { role:"user", content: JSON.stringify({ message, facts }) }
+  ];
+  const resp = await openai.chat.completions.create({
+    model: "gpt-4o",
+    temperature: 0.3,
+    messages
+  });
+  const raw = resp.choices?.[0]?.message?.content || "{}";
+  const json = (() => { const m = raw.match(/```json\s*([\s\S]*?)```/i); return (m ? m[1] : raw).trim(); })();
+  try { return JSON.parse(json); }
+  catch { return { say:"Sorry, ik kon dit niet goed verwerken.", facts, ask:"Wil je het anders formuleren?", suggestions:[], concept:null, done:false }; }
+}
+
+// ---------- API handler ----------
+export default async function handler(req, res) {
+  try{
+    if (req.method !== "POST") return res.status(405).json({ error: "Use POST" });
+
+    const { message="", facts: clientFacts={}, history=[] } = req.body || {};
+
+    const llm = await callLLM({ facts: clientFacts, history, message });
+
+    // Merge + vaste rechtsbasis + rechtbank
+    let facts = mergeFacts(clientFacts, llm.facts || {});
+    set(facts, "recht.toepasselijk", "Nederlands recht");
+    if (get(facts,"forum.woonplaats_gebruiker") && !get(facts,"forum.rechtbank")) {
+      set(facts,"forum.rechtbank", nearestCourt(get(facts,"forum.woonplaats_gebruiker")));
     }
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          {
-            role: 'system',
-            content: 'Je bent JoopJurist, een juridische chatbot die gebruikers helpt bij het opstellen van juridische documenten door gestructureerde informatie te verzamelen en advies te geven in duidelijke taal.'
-          },
-          {
-            role: 'user',
-            content: message
-          }
-        ]
-      })
+    // Catalog-suggesties
+    let suggestions = pickCatalogSuggestions(facts, message);
+    if (Array.isArray(llm.suggestions) && llm.suggestions.length){
+      const combined = [...suggestions];
+      for (const s of llm.suggestions) {
+        if (!combined.find(x => x.id === s.id) && combined.length < 3) combined.push(s);
+      }
+      suggestions = combined;
+    }
+
+    // Concept beslissen
+    const missing = missingKeys(facts);
+    const userWants = wantsDraft(message);
+    let concept = null;
+    let done = false;
+
+    if (missing.length === 0) {
+      concept = renderConcept(facts, false);
+      done = true;
+    } else if (userWants) {
+      concept = renderConcept(facts, true);
+      done = true;
+      if (!llm.ask) llm.ask = `Wil je eerst **${prettyLabel(missing[0])}** geven? Dan werk ik het concept direct bij.`;
+    } else {
+      if (!llm.ask) llm.ask = `Zullen we dit eerst invullen: **${prettyLabel(missing[0])}**? Je kunt ook zeggen: “Toon alvast het concept.”`;
+      concept = null; done = false;
+    }
+
+    // “neem 1 en 3”
+    const picked = parseSuggestionSelection(message, suggestions);
+    if (picked.length && concept){
+      const extra = picked.map(s => `\n**Aanvullende bepaling – ${s.title}**\n${s.clause}\n`).join("");
+      concept += `\n${extra}`;
+    }
+
+    res.status(200).json({
+      say: llm.say || "Helder.",
+      facts,
+      ask: llm.ask || null,
+      suggestions,
+      concept,
+      done
     });
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      return res.status(response.status).json({
-        error: "OpenAI gaf geen geldig antwoord terug.",
-        details: data
-      });
-    }
-
-    // Antwoord terugsturen naar de frontend
-    return res.status(200).json(data);
-
-  } catch (error) {
-    console.error("Fout in API-route:", error);
-    return res.status(500).json({ error: 'Interne serverfout bij het aanroepen van OpenAI.' });
+  }catch(err){
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
   }
+}
+
+// ---------- Concept renderer ----------
+function renderConcept(f, usePH){
+  const v = p => get(f,p) || (usePH ? PH : "");
+  const bedrag = get(f,"prijs.bedrag");
+  const prijsStr = bedrag
+    ? `€ ${Number(bedrag).toLocaleString("nl-NL",{minimumFractionDigits:2, maximumFractionDigits:2})}`
+    : (usePH ? PH : "€ …");
+  const forum = get(f,"forum.rechtbank") || (usePH ? PH : "dichtstbijzijnde rechtbank bij woonplaats koper");
+
+  return [
+`**KOOPOVEREENKOMST – SPULLEN (roerende zaak)**
+
+**Partijen**
+1. **Koper**: ${v("koper.naam")}${get(f,"koper.adres")?`, ${get(f,"koper.adres")}`:""}.
+2. **Verkoper**: ${v("verkoper.naam")}${get(f,"verkoper.adres")?`, ${get(f,"verkoper.adres")}`:""}.
+
+**1. Omschrijving van het object**
+Het verkochte betreft: **${v("object.omschrijving")}**${get(f,"object.conditie")?`, conditie: ${get(f,"object.conditie")}`:""}${get(f,"object.identifiers")?` (identificatie: ${get(f,"object.identifiers")})`:""}.
+
+**2. Prijs en betaling**
+De koopprijs bedraagt **${prijsStr}**. Betaling via ${get(f,"betaling.wijze")||"overboeking"} op ${get(f,"betaling.moment")||"moment van levering"}.
+
+**3. Levering en risico**
+Levering vindt plaats op **${v("levering.datum")}** te **${v("levering.plaats")}**. Het risico gaat over bij levering.
+
+**4. Eigendom en garanties**
+Verkoper verklaart eigenaar te zijn en dat het object vrij is van beslagen en beperkte rechten. Verborgen gebreken die verkoper kende blijven voor rekening van verkoper.
+
+**5. Toepasselijk recht en forumkeuze**
+Op deze overeenkomst is **Nederlands recht** van toepassing.
+Geschillen worden exclusief voorgelegd aan de **${forum}**.
+
+**Ondertekening**
+${get(f,"koper.naam")||"Koper"} – datum handtekening: _____________________
+${get(f,"verkoper.naam")||"Verkoper"} – datum handtekening: _____________________
+`
+  ].join("\n");
 }
