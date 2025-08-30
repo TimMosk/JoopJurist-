@@ -8,7 +8,7 @@ export const config = { runtime: "nodejs" };
 import OpenAI from "openai";
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// 2) Mini clause-catalogus
+// 2) Mini clause-catalogus (klein gehouden)
 const CATALOG = [
   {
     id: "eigendom_diefstal",
@@ -110,7 +110,7 @@ const prettyLabel = k => ({
 
 const wantsDraft = msg => /toon (alvast )?(het )?concept|laat .*concept|geef .*concept|concept graag|opzet|voorbeeld|draft/i.test(msg||"");
 
-detectCategory(facts){
+function detectCategory(facts){
   const s = (facts?.object?.omschrijving || "").toLowerCase();
   if (/fiets|e-bike|racefiets|mtb|bakfiets|mountainbike/.test(s)) return "fiets";
   if (/laptop|notebook|macbook|computer|pc/.test(s)) return "laptop";
@@ -119,14 +119,14 @@ detectCategory(facts){
   if (/gitaar|piano|keyboard|viool|drum/.test(s)) return "instrument";
   return "overig";
 }
-deriveFlags(facts, lastUserMsg=""){
+function deriveFlags(facts, lastUserMsg=""){
   const price = Number(facts?.prijs?.bedrag || 0);
   const shipping = /verzend|bezorg|opsturen|pakket|postnl|dhl/i.test(lastUserMsg)
                  || /bezorg|aflever/i.test(facts?.levering?.plaats || "");
   const payInParts = /termijn|in delen|gespreid|betaling in delen/i.test(lastUserMsg);
   return { price, shipping, payInParts };
 }
-fillTemplate(tpl, facts, vars={}) {
+function fillTemplate(tpl, facts, vars={}) {
   return tpl.replace(/\{\{([^}|]+)(?:\|([^}]*))?\}\}/g, (_, path, fb) => {
     const v = get(facts, path.trim());
     if (v != null && String(v).trim() !== "") return String(v);
@@ -134,7 +134,7 @@ fillTemplate(tpl, facts, vars={}) {
     return fb != null ? fb : PH;
   });
 }
-pickCatalogSuggestions(facts, lastUserMsg=""){
+function pickCatalogSuggestions(facts, lastUserMsg=""){
   const cat = detectCategory(facts);
   const { price, shipping, payInParts } = deriveFlags(facts, lastUserMsg);
   const matches = CATALOG.filter(it => {
@@ -150,7 +150,7 @@ pickCatalogSuggestions(facts, lastUserMsg=""){
     clause: fillTemplate(it.clause, facts, it.vars || {})
   }));
 }
-parseSuggestionSelection(userMsg="", suggestions=[]){
+function parseSuggestionSelection(userMsg="", suggestions=[]){
   const picks = new Set();
   const m = userMsg.match(/\bneem\b([^.]*)/i);
   if (m) {
@@ -164,16 +164,17 @@ parseSuggestionSelection(userMsg="", suggestions=[]){
   return suggestions.filter(s => picks.has(s.id));
 }
 
+// 4) Fallback-extractor: haal namen uit platte tekst (bv. “Koper: Jan Jansen”)
 function extractFactsFromMessage(msg = "") {
   const f = {};
-  // Koper: “Koper: Jan Jansen” / “Koper is Jan Jansen”
+  // Koper
   let m = msg.match(/\bkoper\b[^A-Za-z0-9]+(?:is|=|:)?\s*([A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ' -]{1,60})/i);
   if (m) {
     const name = m[1].trim().replace(/[.,;:]+$/, "");
     if (!f.koper) f.koper = {};
     f.koper.naam = name;
   }
-  // Verkoper: “Verkoper: Piet Pieters”
+  // Verkoper
   m = msg.match(/\bverkoper\b[^A-Za-z0-9]+(?:is|=|:)?\s*([A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ' -]{1,60})/i);
   if (m) {
     const name = m[1].trim().replace(/[.,;:]+$/, "");
@@ -183,39 +184,15 @@ function extractFactsFromMessage(msg = "") {
   return f;
 }
 
-// 4) Normaliseer say/ask (vraag alleen in ask)
-function normalizeSayAsk(llm) {
-  if (!llm) return;
-
-  // Als er een vraag in 'say' zit, verplaats die naar 'ask'
-  if (llm.say && llm.say.includes("?")) {
-    const idx = llm.say.lastIndexOf("?");
-    const before = llm.say.slice(0, idx).trim();
-    const q = llm.say.slice(idx).trim();
-    llm.say = before.replace(/[–—-]\s*$/, "").trim();
-    if (!llm.ask) {
-      const cleaned = q.replace(/^[?.!\s-]+/, "").trim();
-      if (cleaned) llm.ask = cleaned.endsWith("?") ? cleaned : cleaned + "?";
-    }
-  }
-
-  // Als ask leeg of duplicaat is, maak 'm null
-  if (llm.ask) {
-    const norm = s => (s || "").replace(/\W+/g, "").toLowerCase();
-    if (!llm.ask.trim() || norm(llm.ask) === norm(llm.say)) {
-      llm.ask = null;
-    }
-  }
-}
-
 // 5) Prompt + LLM-call (JSON afdwingen)
 const SYSTEM_PROMPT = `
-Je bent "JoopJurist", een Nederlandse jurist met veel ervaring met consumentenkoop. Doel: help bij koopovereenkomst voor spullen (roerende zaak) in natuurlijk Nederlands.
+Je bent "JoopJurist", een Nederlandse jurist met veel ervaring. Doel: help bij koopovereenkomst voor spullen (roerende zaak) in natuurlijk Nederlands.
 
 OUTPUT-STIJL:
 - "say" = 1–2 korte, vriendelijke zinnen zonder vraag.
 - Heb je een vraag? Zet exact één korte vraag in "ask". Herhaal die niet in "say".
 - Geen suggesties in de allereerste beurt; pas wanneer de gebruiker daarom vraagt of er al wat feiten zijn.
+- Altijd Nederlands; datums liefst ISO (YYYY-MM-DD).
 
 FACTS-SCHEMA (gebruik exact deze padnamen, niets anders):
 facts = {
@@ -228,11 +205,11 @@ facts = {
   "recht":   { "toepasselijk": "Nederlands recht" }
 }
 
-REGELS:
-- Vul alleen in wat je redelijk zeker weet uit de laatste gebruikerstekst en de meegegeven facts; overschrijf niet met lege waarden.
-- Datums liefst ISO (YYYY-MM-DD) of dag/maand/jaar uitgeschreven.
-- Forum = dichtstbijzijnde rechtbank bij woonplaats van gebruiker (leid af of vraag 1×).
-- Antwoord ALTIJD als strikt JSON, zonder extra tekst of codefences:
+JURIDISCH:
+- Toepasselijk recht = Nederlands recht.
+- Forumkeuze = dichtstbijzijnde rechtbank bij woonplaats van gebruiker (leid af of vraag 1×).
+
+OUTPUT (STRICT JSON, zonder extra tekst):
 {"say": string, "facts": object, "ask": string|null, "suggestions": [{"id": string, "title": string, "why": string, "clause": string}]|[], "concept": null, "done": boolean}
 `;
 
@@ -247,19 +224,42 @@ async function callLLM({facts, history, message}) {
     model: process.env.OPENAI_MODEL || "gpt-4o",
     temperature: 0.3,
     messages,
-    // 🔒 Dwing zuiver JSON af
+    // 🔒 dwing zuiver JSON af
     response_format: { type: "json_object" }
   });
 
   const raw = resp.choices?.[0]?.message?.content || "{}";
   try { return JSON.parse(raw); }
   catch {
-    // Fallback (zou zelden nodig zijn)
     return { say:"Sorry, ik kon dit niet goed verwerken.", facts, ask:"Wil je het anders formuleren?", suggestions:[], concept:null, done:false };
   }
 }
 
-// 6) API handler
+// 6) Normaliseer say/ask (vraag alleen in ask)
+function normalizeSayAsk(llm) {
+  if (!llm) return;
+
+  // verplaats vraag in 'say' naar 'ask'
+  if (llm.say && llm.say.includes("?")) {
+    const idx = llm.say.lastIndexOf("?");
+    const before = llm.say.slice(0, idx).trim();
+    const q = llm.say.slice(idx).trim();
+    llm.say = before.replace(/[–—-]\s*$/, "").trim();
+    if (!llm.ask) {
+      const cleaned = q.replace(/^[?.!\s-]+/, "").trim();
+      if (cleaned) llm.ask = cleaned.endsWith("?") ? cleaned : cleaned + "?";
+    }
+  }
+  // dubbele/lege ask → null
+  if (llm.ask) {
+    const norm = s => (s || "").replace(/\W+/g, "").toLowerCase();
+    if (!llm.ask.trim() || norm(llm.ask) === norm(llm.say)) {
+      llm.ask = null;
+    }
+  }
+}
+
+// 7) API handler
 export default async function handler(req, res) {
   try{
     if (req.method !== "POST") return res.status(405).json({ error: "Use POST" });
@@ -267,38 +267,38 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Missing OPENAI_API_KEY" });
     }
 
-   const { message="", facts: clientFacts={}, history=[] } = req.body || {};
+    const { message="", facts: clientFacts={}, history=[] } = req.body || {};
 
-// haal simpele feiten uit de userzin (fallback)
+    // 7a) Fallback-extractie vóór de LLM-call
     const extracted = extractFactsFromMessage(message);
-// geef die alvast mee aan het model
     const preFacts = mergeFacts(clientFacts, extracted);
 
+    // 7b) LLM-analyse (met preFacts) + normaliseren
     const llm = await callLLM({ facts: preFacts, history, message });
     normalizeSayAsk(llm);
 
-    // Merge + vaste rechtsbasis + rechtbank
+    // 7c) Facts samenvoegen + vaste rechtsbasis + forum
     let facts = mergeFacts(preFacts, llm.facts || {});
     set(facts, "recht.toepasselijk", "Nederlands recht");
 
-    // extra fallback: vul koper/verkoper alsnog uit message indien nog leeg
+    // extra fallback: vul koper/verkoper alsnog als ze nog leeg zijn
     if (!get(facts, "koper.naam")) {
-    const f2 = extractFactsFromMessage(message);
-    if (f2?.koper?.naam) set(facts, "koper.naam", f2.koper.naam);
+      const f2 = extractFactsFromMessage(message);
+      if (f2?.koper?.naam) set(facts, "koper.naam", f2.koper.naam);
     }
     if (!get(facts, "verkoper.naam")) {
-    const f2 = extractFactsFromMessage(message);
-    if (f2?.verkoper?.naam) set(facts, "verkoper.naam", f2.verkoper.naam);
+      const f2 = extractFactsFromMessage(message);
+      if (f2?.verkoper?.naam) set(facts, "verkoper.naam", f2.verkoper.naam);
     }
 
     if (get(facts,"forum.woonplaats_gebruiker") && !get(facts,"forum.rechtbank")) {
-    set(facts,"forum.rechtbank", nearestCourt(get(facts,"forum.woonplaats_gebruiker")));
+      set(facts,"forum.rechtbank", nearestCourt(get(facts,"forum.woonplaats_gebruiker")));
     }
 
-    // Bepaal missende velden (nu al nodig voor gating)
+    // 7d) Missing bepalen (nodig voor suggestie-gating)
     const missing = missingKeys(facts);
 
-    // Gate voor suggesties: niet in beurt 1, tenzij gevraagd; of als er al wat context is en er niet te veel mist
+    // 7e) Suggesties pas tonen als erom gevraagd is of als er al wat context is
     const userAskedForSugg = /\b(suggest|advies|aanvull|clausul|extra|neem\s+\d)/i.test(message);
     let suggestions = [];
     const allowSuggestions = userAskedForSugg || ((history && history.length > 0) && missing.length <= 3);
@@ -313,7 +313,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // Concept beslissen
+    // 7f) Concept beslissen
     const userWants = wantsDraft(message);
     let concept = null;
     let done = false;
@@ -322,7 +322,7 @@ export default async function handler(req, res) {
       concept = renderConcept(facts, false);
       done = true;
     } else if (userWants) {
-      concept = renderConcept(facts, true);
+      concept = renderConcept(facts, true); // placeholders
       done = true;
       if (!llm.ask) llm.ask = `Wil je eerst **${prettyLabel(missing[0])}** geven? Dan werk ik het concept direct bij.`;
     } else {
@@ -330,7 +330,7 @@ export default async function handler(req, res) {
       concept = null; done = false;
     }
 
-    // “neem 1 en 3”
+    // 7g) “neem 1 en 3”
     const picked = parseSuggestionSelection(message, suggestions);
     if (picked.length && concept){
       const extra = picked.map(s => `\n**Aanvullende bepaling – ${s.title}**\n${s.clause}\n`).join("");
@@ -355,7 +355,7 @@ export default async function handler(req, res) {
   }
 }
 
-// 7) Concept renderer
+// 8) Concept renderer
 function renderConcept(f, usePH){
   const v = p => get(f,p) || (usePH ? PH : "");
   const bedrag = get(f,"prijs.bedrag");
