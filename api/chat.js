@@ -110,7 +110,7 @@ const prettyLabel = k => ({
 
 const wantsDraft = msg => /toon (alvast )?(het )?concept|laat .*concept|geef .*concept|concept graag|opzet|voorbeeld|draft/i.test(msg||"");
 
-function detectCategory(facts){
+detectCategory(facts){
   const s = (facts?.object?.omschrijving || "").toLowerCase();
   if (/fiets|e-bike|racefiets|mtb|bakfiets|mountainbike/.test(s)) return "fiets";
   if (/laptop|notebook|macbook|computer|pc/.test(s)) return "laptop";
@@ -119,14 +119,14 @@ function detectCategory(facts){
   if (/gitaar|piano|keyboard|viool|drum/.test(s)) return "instrument";
   return "overig";
 }
-function deriveFlags(facts, lastUserMsg=""){
+deriveFlags(facts, lastUserMsg=""){
   const price = Number(facts?.prijs?.bedrag || 0);
   const shipping = /verzend|bezorg|opsturen|pakket|postnl|dhl/i.test(lastUserMsg)
                  || /bezorg|aflever/i.test(facts?.levering?.plaats || "");
   const payInParts = /termijn|in delen|gespreid|betaling in delen/i.test(lastUserMsg);
   return { price, shipping, payInParts };
 }
-function fillTemplate(tpl, facts, vars={}) {
+fillTemplate(tpl, facts, vars={}) {
   return tpl.replace(/\{\{([^}|]+)(?:\|([^}]*))?\}\}/g, (_, path, fb) => {
     const v = get(facts, path.trim());
     if (v != null && String(v).trim() !== "") return String(v);
@@ -134,7 +134,7 @@ function fillTemplate(tpl, facts, vars={}) {
     return fb != null ? fb : PH;
   });
 }
-function pickCatalogSuggestions(facts, lastUserMsg=""){
+pickCatalogSuggestions(facts, lastUserMsg=""){
   const cat = detectCategory(facts);
   const { price, shipping, payInParts } = deriveFlags(facts, lastUserMsg);
   const matches = CATALOG.filter(it => {
@@ -150,7 +150,7 @@ function pickCatalogSuggestions(facts, lastUserMsg=""){
     clause: fillTemplate(it.clause, facts, it.vars || {})
   }));
 }
-function parseSuggestionSelection(userMsg="", suggestions=[]){
+parseSuggestionSelection(userMsg="", suggestions=[]){
   const picks = new Set();
   const m = userMsg.match(/\bneem\b([^.]*)/i);
   if (m) {
@@ -191,19 +191,29 @@ function normalizeSayAsk(llm) {
 
 // 5) Prompt + LLM-call (JSON afdwingen)
 const SYSTEM_PROMPT = `
-Je bent "JoopJurist", een Nederlandse jurist met veel ervaring. Doel: help bij koopovereenkomst voor spullen (roerende zaak) in natuurlijk Nederlands.
+Je bent "JoopJurist", een Nederlandse jurist met veel ervaring met consumentenkoop. Doel: help bij koopovereenkomst voor spullen (roerende zaak) in natuurlijk Nederlands.
 
-STIJL:
-- "say" = 1–2 korte, vriendelijke zinnen (samenvatting/acknowledgement). **Geen vraag** in "say".
-- Heb je een vraag? Zet **exact één korte vraag in "ask"**. Herhaal de vraag niet in "say".
-- Geef **geen suggesties in de allereerste beurt**. Stel 1–3 suggesties alleen voor als de gebruiker erom vraagt of als er al wat feiten bekend zijn.
-- Altijd Nederlands; datums liefst ISO (YYYY-MM-DD).
+OUTPUT-STIJL:
+- "say" = 1–2 korte, vriendelijke zinnen zonder vraag.
+- Heb je een vraag? Zet exact één korte vraag in "ask". Herhaal die niet in "say".
+- Geen suggesties in de allereerste beurt; pas wanneer de gebruiker daarom vraagt of er al wat feiten zijn.
 
-JURIDISCH:
-- Toepasselijk recht = Nederlands recht.
-- Forumkeuze = dichtstbijzijnde rechtbank bij woonplaats van gebruiker (leid af of vraag 1×).
+FACTS-SCHEMA (gebruik exact deze padnamen, niets anders):
+facts = {
+  "koper":   { "naam": string|null, "adres": string|null },
+  "verkoper":{ "naam": string|null, "adres": string|null },
+  "object":  { "omschrijving": string|null, "conditie": string|null, "identifiers": string|null },
+  "prijs":   { "bedrag": number|null },
+  "levering":{ "datum": string|null, "plaats": string|null },
+  "forum":   { "woonplaats_gebruiker": string|null, "rechtbank": string|null },
+  "recht":   { "toepasselijk": "Nederlands recht" }
+}
 
-OUTPUT (STRICT JSON, zonder extra tekst):
+REGELS:
+- Vul alleen in wat je redelijk zeker weet uit de laatste gebruikerstekst en de meegegeven facts; overschrijf niet met lege waarden.
+- Datums liefst ISO (YYYY-MM-DD) of dag/maand/jaar uitgeschreven.
+- Forum = dichtstbijzijnde rechtbank bij woonplaats van gebruiker (leid af of vraag 1×).
+- Antwoord ALTIJD als strikt JSON, zonder extra tekst of codefences:
 {"say": string, "facts": object, "ask": string|null, "suggestions": [{"id": string, "title": string, "why": string, "clause": string}]|[], "concept": null, "done": boolean}
 `;
 
