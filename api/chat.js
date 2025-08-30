@@ -164,6 +164,25 @@ parseSuggestionSelection(userMsg="", suggestions=[]){
   return suggestions.filter(s => picks.has(s.id));
 }
 
+function extractFactsFromMessage(msg = "") {
+  const f = {};
+  // Koper: “Koper: Jan Jansen” / “Koper is Jan Jansen”
+  let m = msg.match(/\bkoper\b[^A-Za-z0-9]+(?:is|=|:)?\s*([A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ' -]{1,60})/i);
+  if (m) {
+    const name = m[1].trim().replace(/[.,;:]+$/, "");
+    if (!f.koper) f.koper = {};
+    f.koper.naam = name;
+  }
+  // Verkoper: “Verkoper: Piet Pieters”
+  m = msg.match(/\bverkoper\b[^A-Za-z0-9]+(?:is|=|:)?\s*([A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ' -]{1,60})/i);
+  if (m) {
+    const name = m[1].trim().replace(/[.,;:]+$/, "");
+    if (!f.verkoper) f.verkoper = {};
+    f.verkoper.naam = name;
+  }
+  return f;
+}
+
 // 4) Normaliseer say/ask (vraag alleen in ask)
 function normalizeSayAsk(llm) {
   if (!llm) return;
@@ -248,17 +267,32 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Missing OPENAI_API_KEY" });
     }
 
-    const { message="", facts: clientFacts={}, history=[] } = req.body || {};
+   const { message="", facts: clientFacts={}, history=[] } = req.body || {};
 
-    // LLM-analyse
-    const llm = await callLLM({ facts: clientFacts, history, message });
+// haal simpele feiten uit de userzin (fallback)
+    const extracted = extractFactsFromMessage(message);
+// geef die alvast mee aan het model
+    const preFacts = mergeFacts(clientFacts, extracted);
+
+    const llm = await callLLM({ facts: preFacts, history, message });
     normalizeSayAsk(llm);
 
     // Merge + vaste rechtsbasis + rechtbank
-    let facts = mergeFacts(clientFacts, llm.facts || {});
+    let facts = mergeFacts(preFacts, llm.facts || {});
     set(facts, "recht.toepasselijk", "Nederlands recht");
+
+    // extra fallback: vul koper/verkoper alsnog uit message indien nog leeg
+    if (!get(facts, "koper.naam")) {
+    const f2 = extractFactsFromMessage(message);
+    if (f2?.koper?.naam) set(facts, "koper.naam", f2.koper.naam);
+    }
+    if (!get(facts, "verkoper.naam")) {
+    const f2 = extractFactsFromMessage(message);
+    if (f2?.verkoper?.naam) set(facts, "verkoper.naam", f2.verkoper.naam);
+    }
+
     if (get(facts,"forum.woonplaats_gebruiker") && !get(facts,"forum.rechtbank")) {
-      set(facts,"forum.rechtbank", nearestCourt(get(facts,"forum.woonplaats_gebruiker")));
+    set(facts,"forum.rechtbank", nearestCourt(get(facts,"forum.woonplaats_gebruiker")));
     }
 
     // Bepaal missende velden (nu al nodig voor gating)
