@@ -77,25 +77,20 @@ if (!data || typeof data !== "object") {
 } else {
   if (data.facts) facts = data.facts;
 
-  if (data.say) {
-    addAiMarkdown(data.say);
-    history.push({ role: "assistant", content: data.say });
-  }
+const parts = [];
+if (data.say) parts.push(data.say);
+if (!data.concept && data.ask) parts.push(`_${data.ask}_`); // vraag cursief, zelfde bubbel
 
-  if (data.ask) {
-    addAiMarkdown(data.ask);
-    history.push({ role: "assistant", content: data.ask });
-  }
+if (parts.length) {
+  const oneBubble = parts.join("\n\n");
+  addAiMarkdown(oneBubble);
+  history.push({ role: "assistant", content: oneBubble });
+}
 
-  if (Array.isArray(data.suggestions) && data.suggestions.length) {
-    const bullets = data.suggestions.map((s, i) => `**${i+1}. ${s.title}**\n— ${s.why}`).join("\n\n");
-    addAiMarkdown(`**Mogelijke aanvullingen:**\n${bullets}\n*Zeg bijvoorbeeld: “neem 1 en 3”.*`);
-    history.push({ role: "assistant", content: bullets });
-  }
-
-  if (data.concept) {
-    addAiMarkdown(data.concept);
-    history.push({ role: "assistant", content: data.concept });
+// Concept (als het er is) tonen in een eigen, enkele bubbel
+if (data.concept) {
+  addAiMarkdown(data.concept);
+  history.push({ role: "assistant", content: "[concept]" });
   }
 }
     
