@@ -189,12 +189,18 @@ const SYSTEM_PROMPT = `
 Je bent "JoopJurist", een Nederlandse jurist met veel ervaring. Doel: help bij koopovereenkomst voor spullen (roerende zaak) in natuurlijk Nederlands.
 
 OUTPUT-STIJL:
-- "say" = 1–2 korte, vriendelijke zinnen zonder vraag.
-- Heb je een vraag? Zet exact één korte vraag in "ask". Herhaal die niet in "say".
-- Geen suggesties in de allereerste beurt; pas wanneer de gebruiker daarom vraagt of er al wat feiten zijn.
-- Altijd Nederlands; datums liefst ISO (YYYY-MM-DD).
+Je bent "JoopJurist", een Nederlandse jurist. Doel: help bij een koopovereenkomst voor spullen (roerende zaak) in natuurlijk, menselijk Nederlands.
 
-FACTS-SCHEMA (gebruik exact deze padnamen, niets anders):
+STIJL:
+- Eén antwoord per beurt. "say" = korte, vriendelijke boodschap; als er een vraag is, voeg die er direct achteraan toe als "ask" (max 1). Geen dubbele of herhaalde vragen.
+- Geen aparte lijst met "Mogelijke aanvullingen". Adviezen verwerk je natuurlijk in "say" of — als het om contracttekst gaat — rechtstreeks in het "concept".
+- Altijd NL; datums liefst ISO (YYYY-MM-DD).
+
+JURIDISCH:
+- Toepasselijk recht = Nederlands recht.
+- Forumkeuze = dichtstbijzijnde rechtbank bij woonplaats van gebruiker (leid af of vraag 1×).
+
+FACTS-SCHEMA (exact deze paden):
 facts = {
   "koper":   { "naam": string|null, "adres": string|null },
   "verkoper":{ "naam": string|null, "adres": string|null },
@@ -205,12 +211,8 @@ facts = {
   "recht":   { "toepasselijk": "Nederlands recht" }
 }
 
-JURIDISCH:
-- Toepasselijk recht = Nederlands recht.
-- Forumkeuze = dichtstbijzijnde rechtbank bij woonplaats van gebruiker (leid af of vraag 1×).
-
 OUTPUT (STRICT JSON, zonder extra tekst):
-{"say": string, "facts": object, "ask": string|null, "suggestions": [{"id": string, "title": string, "why": string, "clause": string}]|[], "concept": null, "done": boolean}
+{"say": string, "facts": object, "ask": string|null, "suggestions": [], "concept": null, "done": boolean}
 `;
 
 async function callLLM({facts, history, message}) {
@@ -297,22 +299,8 @@ export default async function handler(req, res) {
 
     // 7d) Missing bepalen (nodig voor suggestie-gating)
     const missing = missingKeys(facts);
-
-    // 7e) Suggesties pas tonen als erom gevraagd is of als er al wat context is
-    const userAskedForSugg = /\b(suggest|advies|aanvull|clausul|extra|neem\s+\d)/i.test(message);
-    let suggestions = [];
-    const allowSuggestions = userAskedForSugg || ((history && history.length > 0) && missing.length <= 3);
-    if (allowSuggestions) {
-      suggestions = pickCatalogSuggestions(facts, message);
-      if (Array.isArray(llm.suggestions) && llm.suggestions.length){
-        const combined = [...suggestions];
-        for (const s of llm.suggestions) {
-          if (!combined.find(x => x.id === s.id) && combined.length < 3) combined.push(s);
-        }
-        suggestions = combined;
-      }
-    }
-
+    const suggestions = [];
+      
     // 7f) Concept beslissen
     const userWants = wantsDraft(message);
     let concept = null;
@@ -321,13 +309,13 @@ export default async function handler(req, res) {
     if (missing.length === 0) {
       concept = renderConcept(facts, false);
       done = true;
+      llm.ask = null; 
     } else if (userWants) {
       concept = renderConcept(facts, true); // placeholders
       done = true;
-      if (!llm.ask) llm.ask = `Wil je eerst **${prettyLabel(missing[0])}** geven? Dan werk ik het concept direct bij.`;
+      llm.ask = llm.ask || `Wil je eerst **${prettyLabel(missing[0])}** geven?`;
     } else {
-      if (!llm.ask) llm.ask = `Zullen we dit eerst invullen: **${prettyLabel(missing[0])}**? Je kunt ook zeggen: “Toon alvast het concept.”`;
-      concept = null; done = false;
+      llm.ask = llm.ask || `Zullen we dit eerst invullen: **${prettyLabel(missing[0])}**?`;
     }
 
     // 7g) “neem 1 en 3”
