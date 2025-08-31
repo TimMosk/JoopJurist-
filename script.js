@@ -98,39 +98,24 @@ if (!data || typeof data !== "object") {
     history.push({ role: "assistant", content: data.concept });
   }
 }
-
-    if (Array.isArray(data.suggestions) && data.suggestions.length){
-      const bullets = data.suggestions.map((s,i)=>`**${i+1}. ${s.title}** — ${s.why}`).join("\n");
-      addAiMarkdown(`**Mogelijke aanvullingen:**\n${bullets}\n\n_Zeg bijvoorbeeld: “neem 1 en 3” of “alleen eigendom”.__`);
-      history.push({ role:"assistant", content: "[suggestions]" });
-    }
-
-    if (data.ask){
-      addAiMarkdown(data.ask);
-      history.push({ role:"assistant", content: data.ask });
-    }
-
-    if (data.concept){
-      addAiMarkdown(data.concept);
-      history.push({ role:"assistant", content: "[concept]" });
-    }
-
+    
   } catch (e) {
-  // only real network/JS errors land here (we no longer throw on non-OK)
-  if (typeof typing !== "undefined" && typing) typing.remove?.();
+  // alleen echte netwerk/JS-fouten komen hier; HTTP-fouten zijn al afgehandeld
+  typing?.remove?.();
   const reason = e?.message || String(e) || "onbekende fout";
   addAiMarkdown(`⚠️ Netwerkfout – ${reason}`);
   console.error("Fetch/JS error", e);
 } finally {
-  // always restore the UI
-  const btn = document.getElementById("send-btn");
-  if (typeof input !== "undefined" && input) {
-    input.disabled = false;
-    input.focus();
+  // UI altijd herstellen
+  const btnEl = document.getElementById("send-btn");
+  const inputEl = document.getElementById("user-input");
+  if (inputEl) {
+    inputEl.disabled = false;
+    inputEl.focus();
   }
-  if (btn) {
-    btn.disabled = false;
-    btn.textContent = t?.send || "Verstuur";
+  if (btnEl) {
+    btnEl.disabled = false;
+    btnEl.textContent = t?.send || "Verstuur";
   }
 }
 }
