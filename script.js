@@ -45,20 +45,59 @@ async function sendMessage(){
 
   try{
     const res = await fetch("/api/chat", {
-      method:"POST",
-      headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ message: msg, facts, history: history.slice(-10) })
-    });
-    if(!res.ok) throw new Error("HTTP "+res.status);
-    const data = await res.json();
-    typing.remove();
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ message: msg, facts, history: history.slice(-10) })
+});
 
-    if (data.facts) facts = data.facts;
+// lees ALTIJD eerst de body als tekst (kan ook geen-JSON fout zijn)
+const payloadText = await res.text();
+let data = null;
+try { data = JSON.parse(payloadText); } catch {}
 
-    if (data.say){
-      addAiMarkdown(data.say);
-      history.push({ role:"assistant", content: data.say });
-    }
+// HTTP-fout? Toon status + details van de server en stop netjes
+if (!res.ok) {
+  typing?.remove();
+  const reason = (data && (data.details || data.error)) || payloadText || "Onbekende fout";
+  addAiMarkdown(`⚠️ Serverfout **${res.status}** – ${reason}`);
+  console.error("API error", res.status, reason);
+  // UI herstellen (pas namen aan jouw variabelen aan)
+  input?.removeAttribute("disabled");
+  btn?.removeAttribute("disabled");
+  if (btn) btn.textContent = "Verstuur";
+  input?.focus();
+  return;
+}
+
+// happy path
+typing?.remove();
+if (!data || typeof data !== "object") {
+  addAiMarkdown("⚠️ Ongeldige serverrespons.");
+  console.error("Invalid body:", payloadText);
+} else {
+  if (data.facts) facts = data.facts;
+
+  if (data.say) {
+    addAiMarkdown(data.say);
+    history.push({ role: "assistant", content: data.say });
+  }
+
+  if (data.ask) {
+    addAiMarkdown(data.ask);
+    history.push({ role: "assistant", content: data.ask });
+  }
+
+  if (Array.isArray(data.suggestions) && data.suggestions.length) {
+    const bullets = data.suggestions.map((s, i) => `**${i+1}. ${s.title}**\n— ${s.why}`).join("\n\n");
+    addAiMarkdown(`**Mogelijke aanvullingen:**\n${bullets}\n*Zeg bijvoorbeeld: “neem 1 en 3”.*`);
+    history.push({ role: "assistant", content: bullets });
+  }
+
+  if (data.concept) {
+    addAiMarkdown(data.concept);
+    history.push({ role: "assistant", content: data.concept });
+  }
+}
 
     if (Array.isArray(data.suggestions) && data.suggestions.length){
       const bullets = data.suggestions.map((s,i)=>`**${i+1}. ${s.title}** — ${s.why}`).join("\n");
@@ -76,15 +115,24 @@ async function sendMessage(){
       history.push({ role:"assistant", content: "[concept]" });
     }
 
-  }catch(e){
-    typing.remove();
-    addAiMarkdown(t.network);
-    console.error(e);
-  }finally{
-    const b = $("#send-btn");
-    input.disabled=false; input.focus();
-    if(b){ b.disabled=false; b.textContent=t.send; }
+  } catch (e) {
+  // only real network/JS errors land here (we no longer throw on non-OK)
+  if (typeof typing !== "undefined" && typing) typing.remove?.();
+  const reason = e?.message || String(e) || "onbekende fout";
+  addAiMarkdown(`⚠️ Netwerkfout – ${reason}`);
+  console.error("Fetch/JS error", e);
+} finally {
+  // always restore the UI
+  const btn = document.getElementById("send-btn");
+  if (typeof input !== "undefined" && input) {
+    input.disabled = false;
+    input.focus();
   }
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = t?.send || "Verstuur";
+  }
+}
 }
 
 window.addEventListener("DOMContentLoaded", ()=>{
@@ -93,5 +141,5 @@ window.addEventListener("DOMContentLoaded", ()=>{
   input.placeholder = t.placeholder;
   if(btn){ btn.textContent=t.send; btn.onclick=null; btn.addEventListener("click", sendMessage); }
   input.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); sendMessage(); }});
-  addAiMarkdown("Ik ben **JoopJurist**. Vertel in je eigen woorden wat je wil regelen; ik denk mee, vul aan en stel alleen vragen die nodig zijn. Je kunt altijd zeggen: _“Toon alvast het concept.”_");
+  addAiMarkdown("Ik ben **JoopJurist**. Vertel in je eigen woorden wat je wil regelen; ik denk mee, vul aan en stel de juiste vragen.");
 });
