@@ -346,7 +346,25 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Missing OPENAI_API_KEY" });
     }
 
-    const { message="", facts: clientFacts={}, history=[], clientNow } = req.body || {};
+    const {
+      message = "",
+      facts: clientFacts = {},
+      history = [],
+      clientNow,
+      clientOffset
+    } = req.body || {};
+
+    // Maak server-side een Date die dezelfde "wandklok" heeft als bij de gebruiker.
+    // clientNow (ISO) is UTC; clientOffset is minuten (UTC - local).
+    let NOW = new Date();
+    if (clientNow) {
+      const base = new Date(clientNow); // UTC moment
+      if (!isNaN(base)) {
+        const offsetMin = Number.isFinite(clientOffset) ? Number(clientOffset) : 0;
+        // verschuif zodat getFullYear()/getMonth()/getDate() gelden voor de lokale dag van de gebruiker
+        NOW = new Date(base.getTime() - offsetMin * 60 * 1000);
+      }
+    }
     const NOW = clientNow ? new Date(clientNow) : new Date();
     // 7a) Fallback-extractie vóór de LLM-call
     const extracted = extractFactsFromMessage(message);
