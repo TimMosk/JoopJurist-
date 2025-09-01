@@ -108,15 +108,20 @@ const prettyLabel = k => ({
   "levering.plaats":"leveringsplaats"
 }[k] || k);
 
-const wantsDraft = msg => /toon (alvast )?(het )?concept|laat .*concept|geef .*concept|concept graag|opzet|voorbeeld|draft/i.test(msg||"");
+const wantsDraft = msg =>
+  /\b(
+     (toon|laat.*zien|geef)\b.*\b(concept|conceptversie|voorbeeld(contract)?|draft)\b
+     |(concept|conceptversie|voorbeeld(contract)?|opzet|draft)\b\s*(graag|alvast)?
+     |(toon|laat.*zien)\b.*\b(koopovereenkomst|contract)\b
+   )/ix.test(msg || "");
 
 // Intent-heuristiek: contract-gerichte trefwoorden
 const CONTRACT_KW_RE = /(koopovereenkomst|overeenkomst|contract|clausule|bepaling|opstellen|concept|voorbeeld|draft)/i;
-function isContractIntentHeuristic(msg="", history=[]){
+function isContractIntentHeuristic(msg=""){
+  // Alleen huidige bericht gebruiken; geen “sticky intent” uit de history
   if (wantsDraft(msg)) return true;
-  if (CONTRACT_KW_RE.test(msg)) return true;
-  const lastUser = [...(history||[])].reverse().find(m=>m.role==="user")?.content || "";
-  return CONTRACT_KW_RE.test(lastUser);
+  return CONTRACT_KW_RE.test(msg || "");
+ }
 
 function detectCategory(facts){
   const s = (facts?.object?.omschrijving || "").toLowerCase();
@@ -358,22 +363,45 @@ export default async function handler(req, res) {
     
     // 7f) Intent + concept beslissen (gate op intent/should_draft)
     const userWants = wantsDraft(message);
-    const intent = llm.intent || (isContractIntentHeuristic(message, history) ? "contract" : "general");
-    const shouldDraft = !!llm.should_draft || userWants || intent === "contract";
+    
+    // Intent alleen op basis van huidige user-input (of model, maar alleen als die “contract” zegt én de heuristiek het bevestigt)
+    const intentHeur = isContractIntentHeuristic(message) ? "contract" : "general";
+    const intent = (llm.intent === "contract" && intentHeur === "contract") ? "contract" : intentHeur;
+    const shouldDraft = userWants || intent === "contract";
     let concept = null;
     let done = false;
-    const factsBefore = JSON.stringify(preFacts);
-    const factsAfter  = JSON.stringify(facts);
-    const factsChanged = factsBefore !== factsAfter;
+    // Vergelijk enkel kernfeiten (excl. afgeleide velden zoals recht.* en forum.rechtbank)
+    function coreFactsView(f){
+      const v = (p)=>get(f,p);
+      return {
+        koper:{naam:v("koper.naam"),adres:v("koper.adres")},
+        verkoper:{naam:v("verkoper.naam"),adres:v("verkoper.adres")},
+        object:{omschrijving:v("object.omschrijving"),conditie:v("object.conditie"),identifiers:v("object.identifiers")},
+        prijs:{bedrag:v("prijs.bedrag")},
+        levering:{datum:v("levering.datum"),plaats:v("levering.plaats")},
+        // géén forum.rechtbank en géén recht.*, die worden afgeleid
+        betaling:{wijze:v("betaling.wijze"),moment:v("betaling.moment")}
+      };
+    }
+    const factsBeforeCore = JSON.stringify(coreFactsView(preFacts));
+    const factsAfterCore  = JSON.stringify(coreFactsView(facts));
+    const factsChangedCore = factsBeforeCore !== factsAfterCore;
 
-    if (shouldDraft && missing.length === 0 && (factsChanged || userWants)) {
+    // Render-regels:
+    // 1) Altijd renderen bij expliciet verzoek (userWants); placeholders als er nog iets mist
+    // 2) Anders alleen renderen in contract-modus én wanneer kernfeiten net gewijzigd zijn
+    if (userWants && missing.length === 0) {
       concept = renderConcept(facts, false);
       done = true;
       llm.ask = null;
-    } else if (userWants) {
-      concept = renderConcept(facts, true); // placeholders ondanks missende facts
+    } else if (userWants && missing.length > 0) {
+      concept = renderConcept(facts, true);
       done = true;
       llm.ask = llm.ask || `Wil je eerst **${prettyLabel(missing[0])}** geven?`;
+    } else if (shouldDraft && intent === "contract" && missing.length === 0 && factsChangedCore) {
+      concept = renderConcept(facts, false);
+      done = true;
+      llm.ask = null;
     } else if (intent === "contract") {
       llm.ask = llm.ask || `Zullen we dit eerst invullen: **${prettyLabel(missing[0])}**?`;
     } else {
