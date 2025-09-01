@@ -110,6 +110,14 @@ const prettyLabel = k => ({
 
 const wantsDraft = msg => /toon (alvast )?(het )?concept|laat .*concept|geef .*concept|concept graag|opzet|voorbeeld|draft/i.test(msg||"");
 
+// Intent-heuristiek: contract-gerichte trefwoorden
+const CONTRACT_KW_RE = /(koopovereenkomst|overeenkomst|contract|clausule|bepaling|opstellen|concept|voorbeeld|draft)/i;
+function isContractIntentHeuristic(msg="", history=[]){
+  if (wantsDraft(msg)) return true;
+  if (CONTRACT_KW_RE.test(msg)) return true;
+  const lastUser = [...(history||[])].reverse().find(m=>m.role==="user")?.content || "";
+  return CONTRACT_KW_RE.test(lastUser);
+
 function detectCategory(facts){
   const s = (facts?.object?.omschrijving || "").toLowerCase();
   if (/fiets|e-bike|racefiets|mtb|bakfiets|mountainbike/.test(s)) return "fiets";
@@ -184,12 +192,47 @@ function extractFactsFromMessage(msg = "") {
   return f;
 }
 
+// 4b) Datum- en plaatsherkenning (NL) → feiten
+const NL_MONTHS = { jan:1,januari:1, feb:2,februari:2, mrt:3,maart:3, apr:4,april:4, mei:5, jun:6,juni:6, jul:7,juli:7, aug:8,augustus:8, sep:9,sept:9,september:9, okt:10,oktober:10, nov:11,november:11, dec:12,december:12 };
+const NL_DOW = { zondag:0, maandag:1, dinsdag:2, woensdag:3, donderdag:4, vrijdag:5, zaterdag:6 };
+const PLACE_RE = /\b(levering|afhalen|bezorging|overdracht|overhandiging)\b[^.]*?\b(in|te|op)\s+([A-ZÀ-ÖØ-Ý][\w'À-ÖØ-öø-ÿ -]{2,})(?=[,.)]|$)/i;
+const HOME_RE  = /\b(ik\s+woon|woonplaats\s*(is)?|mijn\s*woonplaats\s*(is)?)\b[^.]*?\b(in|te)\s+([A-ZÀ-ÖØ-Ý][\w'À-ÖØ-öø-ÿ -]{2,})(?=[,.)]|$)/i;
+const IN_RE    = /\b(in|te)\s+([A-ZÀ-ÖØ-Ý][\w'À-ÖØ-öø-ÿ -]{2,})(?=[,.)]|$)/g;
+function toISODate(d){ const z=n=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`; }
+function nextDow(from, dow){ const d=new Date(from); const delta=(dow-d.getDay()+7)%7||7; d.setDate(d.getDate()+delta); return d; }
+function parseDateNL(msg, now=new Date()){
+  const s = msg.toLowerCase().normalize("NFKD");
+  if (/\bvandaag\b/.test(s)) return toISODate(now);
+  if (/\bmorgen\b/.test(s)) { const d=new Date(now); d.setDate(d.getDate()+1); return toISODate(d); }
+  if (/\bovermorgen\b/.test(s)) { const d=new Date(now); d.setDate(d.getDate()+2); return toISODate(d); }
+  const mDow = s.match(/\b(aanstaande|komende|volgende)\s+(zondag|maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag)\b/);
+  if (mDow) { const d = nextDow(now, NL_DOW[mDow[2]]); return toISODate(d); }
+  let m = s.match(/\b(20\d{2}|19\d{2})[./-](\d{1,2})[./-](\d{1,2})\b/);
+  if (m) { const d = new Date(Number(m[1]), Number(m[2])-1, Number(m[3])); if(!isNaN(d)) return toISODate(d); }
+  m = s.match(/\b(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\b/);
+  if (m) { let y=Number(m[3]); if (y<100) y+=2000; const d=new Date(y, Number(m[2])-1, Number(m[1])); if(!isNaN(d)) return toISODate(d); }
+  m = s.match(/\b(\d{1,2})\s+([a-z.]+)\s*(\d{2,4})?\b/);
+  if (m && NL_MONTHS[m[2].replace(".","")]) { let y=m[3]?Number(m[3]):now.getFullYear(); if (y<100) y+=2000; const d=new Date(y, NL_MONTHS[m[2].replace(".","")]-1, Number(m[1])); if(!m[3] && d<now) d.setFullYear(d.getFullYear()+1); if(!isNaN(d)) return toISODate(d); }
+  m = s.match(/\b(\d{1,2})[./-](\d{1,2})\b/);
+  if (m) { const y0=now.getFullYear(); let d=new Date(y0, Number(m[2])-1, Number(m[1])); const today=new Date(now.getFullYear(), now.getMonth(), now.getDate()); if (d<today) d.setFullYear(y0+1); if(!isNaN(d)) return toISODate(d); }
+  return null;
+}
+
+function extractDatesPlaces(msg, now=new Date()){
+  const out = {};
+  const iso = parseDateNL(msg, now); if (iso) out["levering.datum"] = iso;
+  let m = msg.match(PLACE_RE); if (m) out["levering.plaats"] = m[3].trim();
+  m = msg.match(HOME_RE); if (m) out["forum.woonplaats_gebruiker"] = m[5].trim();
+  if (!out["levering.plaats"]) { let last=null, r; while ((r=IN_RE.exec(msg))!==null) last=r[2]; if (last) out["levering.plaats"]=last.trim(); }
+  return out;
+}
+  
 // 5) Prompt + LLM-call (JSON afdwingen)
 const SYSTEM_PROMPT = `
 Je bent "JoopJurist", een Nederlandse jurist met veel ervaring. Doel: help bij koopovereenkomst voor spullen (roerende zaak) in natuurlijk Nederlands.
 
 OUTPUT-STIJL:
-Je bent "JoopJurist", een Nederlandse jurist. Doel: help bij een koopovereenkomst voor spullen (roerende zaak) in natuurlijk, menselijk Nederlands.
+Je bent "JoopJurist", een Nederlandse jurist. Doel: help bij juridisch advies over en het maken van een koopovereenkomst voor spullen (roerende zaak) in natuurlijk, menselijk Nederlands.
 
 STIJL:
 - Eén antwoord per beurt. "say" = korte, vriendelijke boodschap; als er een vraag is, voeg die er direct achteraan toe als "ask" (max 1). Geen dubbele of herhaalde vragen.
@@ -199,6 +242,13 @@ STIJL:
 JURIDISCH:
 - Toepasselijk recht = Nederlands recht.
 - Forumkeuze = dichtstbijzijnde rechtbank bij woonplaats van gebruiker (leid af of vraag 1×).
+
+INTENT:
+- Bepaal "intent" ∈ {"contract","general","other"}.
+- "contract" = gebruiker wil (verder) een koopovereenkomst of clausule opstellen/aanpassen/afronden.
+- "general" = algemene vraag/advies (los van het document).
+- "other" = niet te plaatsen/overig.
+- Zet "should_draft" true **alleen** als de gebruiker expliciet om een concept vraagt of duidelijk verder wil met het document; anders false.
 
 FACTS-SCHEMA (exact deze paden):
 facts = {
@@ -212,7 +262,7 @@ facts = {
 }
 
 OUTPUT (STRICT JSON, zonder extra tekst):
-{"say": string, "facts": object, "ask": string|null, "suggestions": [], "concept": null, "done": boolean}
++{"say": string, "facts": object, "ask": string|null, "suggestions": [], "concept": null, "done": boolean, "intent":"contract"|"general"|"other", "should_draft": boolean}
 `;
 
 async function callLLM({facts, history, message}) {
@@ -273,8 +323,13 @@ export default async function handler(req, res) {
 
     // 7a) Fallback-extractie vóór de LLM-call
     const extracted = extractFactsFromMessage(message);
-    const preFacts = mergeFacts(clientFacts, extracted);
-
+    const extractedDP = extractDatesPlaces(message);
+    const mappedDP = {};
+    if (extractedDP["levering.datum"])  set(mappedDP,"levering.datum",extractedDP["levering.datum"]);
+    if (extractedDP["levering.plaats"]) set(mappedDP,"levering.plaats",extractedDP["levering.plaats"]);
+    if (extractedDP["forum.woonplaats_gebruiker"]) set(mappedDP,"forum.woonplaats_gebruiker",extractedDP["forum.woonplaats_gebruiker"]);
+    const preFacts = mergeFacts(mergeFacts(clientFacts, extracted), mappedDP);
+        
     // 7b) LLM-analyse (met preFacts) + normaliseren
     const llm = await callLLM({ facts: preFacts, history, message });
     normalizeSayAsk(llm);
@@ -297,28 +352,39 @@ export default async function handler(req, res) {
       set(facts,"forum.rechtbank", nearestCourt(get(facts,"forum.woonplaats_gebruiker")));
     }
 
-    // 7d) Missing bepalen (nodig voor suggestie-gating)
+    // 7d) Missing bepalen
     const missing = missingKeys(facts);
-    const suggestions = [];
-      
-    // 7f) Concept beslissen
+    let suggestions = [];
+    
+    // 7f) Intent + concept beslissen (gate op intent/should_draft)
     const userWants = wantsDraft(message);
+    const intent = llm.intent || (isContractIntentHeuristic(message, history) ? "contract" : "general");
+    const shouldDraft = !!llm.should_draft || userWants || intent === "contract";
     let concept = null;
     let done = false;
+    const factsBefore = JSON.stringify(preFacts);
+    const factsAfter  = JSON.stringify(facts);
+    const factsChanged = factsBefore !== factsAfter;
 
-    if (missing.length === 0) {
+    if (shouldDraft && missing.length === 0 && (factsChanged || userWants)) {
       concept = renderConcept(facts, false);
       done = true;
-      llm.ask = null; 
+      llm.ask = null;
     } else if (userWants) {
-      concept = renderConcept(facts, true); // placeholders
+      concept = renderConcept(facts, true); // placeholders ondanks missende facts
       done = true;
       llm.ask = llm.ask || `Wil je eerst **${prettyLabel(missing[0])}** geven?`;
-    } else {
+    } else if (intent === "contract") {
       llm.ask = llm.ask || `Zullen we dit eerst invullen: **${prettyLabel(missing[0])}**?`;
+    } else {
+      llm.ask = llm.ask || null; // algemene chat: nooit concept meesturen
     }
 
-    // 7g) “neem 1 en 3”
+    // 7g) Suggesties (alleen in contractmodus en met basisdata)
+    const canSuggest = !!get(facts,"object.omschrijving") && get(facts,"prijs.bedrag") != null;
+    suggestions = (intent === "contract" && canSuggest) ? pickCatalogSuggestions(facts, message) : [];
+
+    // 7h) “neem 1 en 3”
     const picked = parseSuggestionSelection(message, suggestions);
     if (picked.length && concept){
       const extra = picked.map(s => `\n**Aanvullende bepaling – ${s.title}**\n${s.clause}\n`).join("");
