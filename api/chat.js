@@ -200,6 +200,8 @@ function extractFactsFromMessage(msg = "") {
 // 4b) Datum- en plaatsherkenning (NL) → feiten
 const NL_MONTHS = { jan:1,januari:1, feb:2,februari:2, mrt:3,maart:3, apr:4,april:4, mei:5, jun:6,juni:6, jul:7,juli:7, aug:8,augustus:8, sep:9,sept:9,september:9, okt:10,oktober:10, nov:11,november:11, dec:12,december:12 };
 const NL_DOW = { zondag:0, maandag:1, dinsdag:2, woensdag:3, donderdag:4, vrijdag:5, zaterdag:6 };
+function startOfISOWeek(dt){ const d=new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()); const dow=d.getDay()||7; if(dow!==1) d.setDate(d.getDate()-(dow-1)); d.setHours(0,0,0,0); return d; }
+function dayFromISOWeek(monday, dow){ const i=(dow===0?7:dow)-1; const d=new Date(monday); d.setDate(monday.getDate()+i); return d; }
 const PLACE_RE = /\b(levering|afhalen|bezorging|overdracht|overhandiging)\b[^.]*?\b(in|te|op)\s+([A-ZÀ-ÖØ-Ý][\w'À-ÖØ-öø-ÿ -]{2,})(?=[,.)]|$)/i;
 const HOME_RE  = /\b(ik\s+woon|woonplaats\s*(is)?|mijn\s*woonplaats\s*(is)?)\b[^.]*?\b(in|te)\s+([A-ZÀ-ÖØ-Ý][\w'À-ÖØ-öø-ÿ -]{2,})(?=[,.)]|$)/i;
 const IN_RE    = /\b(in|te)\s+([A-ZÀ-ÖØ-Ý][\w'À-ÖØ-öø-ÿ -]{2,})(?=[,.)]|$)/g;
@@ -210,8 +212,21 @@ function parseDateNL(msg, now=new Date()){
   if (/\bvandaag\b/.test(s)) return toISODate(now);
   if (/\bmorgen\b/.test(s)) { const d=new Date(now); d.setDate(d.getDate()+1); return toISODate(d); }
   if (/\bovermorgen\b/.test(s)) { const d=new Date(now); d.setDate(d.getDate()+2); return toISODate(d); }
-  const mDow = s.match(/\b(aanstaande|komende|volgende)\s+(zondag|maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag)\b/);
+  let mDow = s.match(/\b(aanstaande|komende|volgende)\s+(zondag|maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag)\b/);
   if (mDow) { const d = nextDow(now, NL_DOW[mDow[2]]); return toISODate(d); }
+  // 👇 NIEUW: 'volgende week dinsdag' en 'deze week vrijdag'
+  mDow = s.match(/\b(volgende|deze)\s+week\s+(zondag|maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag)\b/);
+  if (mDow) {
+    const part = mDow[1]; const dowWord = mDow[2];
+    let monday = startOfISOWeek(now);
+    if (part === "volgende") monday.setDate(monday.getDate()+7);
+    const d = dayFromISOWeek(monday, NL_DOW[dowWord]);
+    // 'deze week' maar dag is al voorbij → schuif naar volgende week
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if (part === "deze" && d < today) d.setDate(d.getDate()+7);
+    return toISODate(d);
+  }
+  
   let m = s.match(/\b(20\d{2}|19\d{2})[./-](\d{1,2})[./-](\d{1,2})\b/);
   if (m) { const d = new Date(Number(m[1]), Number(m[2])-1, Number(m[3])); if(!isNaN(d)) return toISODate(d); }
   m = s.match(/\b(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\b/);
@@ -331,11 +346,11 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Missing OPENAI_API_KEY" });
     }
 
-    const { message="", facts: clientFacts={}, history=[] } = req.body || {};
-
+    const { message="", facts: clientFacts={}, history=[], clientNow } = req.body || {};
+    const NOW = clientNow ? new Date(clientNow) : new Date();
     // 7a) Fallback-extractie vóór de LLM-call
     const extracted = extractFactsFromMessage(message);
-    const extractedDP = extractDatesPlaces(message);
+    const extractedDP = extractDatesPlaces(message, NOW);
     const mappedDP = {};
     if (extractedDP["levering.datum"])  set(mappedDP,"levering.datum",extractedDP["levering.datum"]);
     if (extractedDP["levering.plaats"]) set(mappedDP,"levering.plaats",extractedDP["levering.plaats"]);
