@@ -47,7 +47,15 @@ async function sendMessage(){
     const res = await fetch("/api/chat", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ message: msg, facts, history: history.slice(-10) })
+  body: JSON.stringify({
+    message: msg,
+    facts,
+    history: history.slice(-10),
+    // 👇 lokaal “nu” uit de browser
+    clientNow: new Date().toISOString(),
+    clientOffset: new Date().getTimezoneOffset(), // in minuten; bv. CET = -60
+    clientTz: Intl.DateTimeFormat().resolvedOptions().timeZone // optioneel
+  })
 });
 
 // lees ALTIJD eerst de body als tekst (kan ook geen-JSON fout zijn)
