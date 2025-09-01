@@ -314,6 +314,13 @@ function normalizeSayAsk(llm) {
       llm.ask = null;
     }
   }
+  // >>> NIEUW: vraag inline in 'say' zetten i.p.v. apart 'ask' veld <<<
+  if (llm.ask && llm.ask.trim()) {
+    const sep = llm.say && !/[?.!…]$/.test(llm.say) ? " — " : " ";
+    const q = llm.ask.trim().replace(/\s*\?+$/, "?");
+    llm.say = (llm.say || "").trim() + sep + q;
+    llm.ask = null; // voorkom aparte (schuine) render in de UI
+  }
 }
 
 // 7) API handler
@@ -470,8 +477,19 @@ Op deze overeenkomst is **Nederlands recht** van toepassing.
 Geschillen worden exclusief voorgelegd aan de **${forum}**.
 
 **Ondertekening**
-${get(f,"koper.naam")||"Koper"} – datum handtekening: _____________________
-${get(f,"verkoper.naam")||"Verkoper"} – datum handtekening: _____________________
++
++**Koper**: ${get(f,"koper.naam")||"Koper"}
++
++Handtekening: _________________________________
++
++Datum: __________________
++
++
++**Verkoper**: ${get(f,"verkoper.naam")||"Verkoper"}
++
++Handtekening: _________________________________
++
++Datum: __________________
 `
   ].join("\n");
 }
