@@ -9,11 +9,15 @@ body, input, button, h1 {
   padding: 0;
 }
 
-/* laat de pagina netjes opvullen: titel → chat → composer */
+/* pagina: gecentreerde kolom met max-breedte */
 .container {
   display: flex;
   flex-direction: column;
   min-height: 100dvh;
+  max-width: 800px;   /* <— zoals voorheen */
+  width: 100%;
+  margin: 0 auto;     /* <— centreert horizontaal */
+  padding: 1rem;      /* binnenmarges */
 }
 
 /* Titel */
