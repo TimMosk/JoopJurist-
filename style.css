@@ -44,24 +44,29 @@ h1 {
   width:100%;
 }
 
-/* Het formulier binnen de wrapper is de flex-rij */
+/* Composer-rij met FLEX (betrouwbaar naast knop in alle browsers) */
 #composer {
-   display: grid;
-   grid-template-columns: 1fr auto; /* input | knop */
-   align-items: center;
-   column-gap: 0.5rem;
-   width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
 }
 
-/* Invoerveld groeit mee */
+/* Invoerveld groeit ALTIJD maximaal mee */
 #composer #user-input {
-  min-width: 0;            /* laat grid het veld vrij schalen */
-  width: 100%;             /* vul de 1fr-kolom volledig */
+  flex: 1 1 0%;            /* pak alle resterende ruimte */
+  min-width: 0;            /* voorkom min-content knelling */
   height: 44px;
   padding: 0.75rem;
   border-radius: 6px;
   border: 1px solid #aaa;
   font-size: 1rem;
+}
+
+/* Fallback: ook als #composer onverhoopt mist, maak input breed in de rij */
+.input-container > input#user-input {
+  width: 100%;
+  height: 44px;
 }
 
 /* nette focus */
@@ -71,8 +76,8 @@ h1 {
   outline: none;
 }
 
-/* knop rechts, eigen breedte */
-#composer #send-btn { justify-self: end; }
+/* Knop krimpt niet mee, houdt eigen breedte */
+#composer #send-btn { flex: 0 0 auto; }
 
 /* Verstuurknop */
 button {
@@ -94,9 +99,14 @@ button:disabled {
 
 /* 📱 Responsieve layout */
 @media (max-width: 600px) {
-   #composer { flex-direction: column; }
-   #composer #send-btn { width: 100%; }
-}
+  #composer { 
+    flex-direction: column; 
+    align-items: stretch; 
+    gap: 0.5rem;
+  }
+  #composer #user-input { width: 100%; }
+  #composer #send-btn { width: 100%; }
+ }
 
 .message {
   display: flex;
