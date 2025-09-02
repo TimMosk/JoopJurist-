@@ -507,19 +507,18 @@ Op deze overeenkomst is **Nederlands recht** van toepassing.
 Geschillen worden exclusief voorgelegd aan de **${forum}**.
 
 **Ondertekening**
-+
-+**Koper**: ${get(f,"koper.naam")||"Koper"}
-+
-+Handtekening: _________________________________
-+
-+Datum: __________________
-+
-+
-+**Verkoper**: ${get(f,"verkoper.naam")||"Verkoper"}
-+
-+Handtekening: _________________________________
-+
-+Datum: __________________
+
+**Koper**: ${get(f,"koper.naam")||"Koper"}
+
+Handtekening: _________________________________
+
+Datum: __________________
+
+**Verkoper**: ${get(f,"verkoper.naam")||"Verkoper"}
+
+Handtekening: _________________________________
+
+Datum: __________________
 `
   ].join("\n");
 }
