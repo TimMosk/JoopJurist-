@@ -34,7 +34,7 @@ let history = [];       // laatste turns
 
 async function sendMessage(){
   const input = $("#user-input");
-  const btn = $("#send-btn") || $("button");
+  const btn = document.querySelector("#composer #send-btn");
   const msg = input.value.trim(); if(!msg) return;
 
   addUser(msg);
@@ -110,7 +110,7 @@ if (data.concept) {
   console.error("Fetch/JS error", e);
 } finally {
   // UI altijd herstellen
-  const btnEl = document.getElementById("send-btn");
+  const btnEl = document.querySelector("#composer #send-btn");
   const inputEl = document.getElementById("user-input");
   if (inputEl) {
     inputEl.disabled = false;
@@ -125,9 +125,17 @@ if (data.concept) {
 
 window.addEventListener("DOMContentLoaded", ()=>{
   const input = $("#user-input");
-  const btn = $("#send-btn") || $("button");
+  const btn = document.querySelector("#composer #send-btn");
+  const form = document.getElementById("composer");
   input.placeholder = t.placeholder;
-  if(btn){ btn.textContent=t.send; btn.onclick=null; btn.addEventListener("click", sendMessage); }
-  input.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); sendMessage(); }});
+  if (btn) { btn.textContent = t.send; }
+  // Verzend via formulier-submit (Enter werkt automatisch). Niet ook nog op click/keydown binden.
+  if (form && !form.dataset.bound) {
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      sendMessage();
+    });
+    form.dataset.bound = "1";
+  }
   addAiMarkdown("Ik ben **JoopJurist**. Vertel in je eigen woorden wat je wil regelen; ik denk mee, vul aan en stel de juiste vragen.");
 });
