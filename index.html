@@ -14,12 +14,13 @@
     <h1>Joop Jurist</h1>
     <div id="chat-log" class="chat-log"></div>
     <div class="input-container">
-      <input type="text" id="user-input" placeholder="Typ hier je vraag..." />
-      <button id="send-btn">Verstuur</button>
+      <form id="composer" autocomplete="off">
+        <input type="text" id="user-input" placeholder="Typ hier je vraag..." />
+        <button id="send-btn" type="submit">Verstuur</button>
+      </form>
     </div>
   </div>
 
-<button id="send-btn">Verstuur</button>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="script.js?v=natural-4"></script>
 </body>
