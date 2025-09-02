@@ -46,17 +46,17 @@ h1 {
 
 /* Het formulier binnen de wrapper is de flex-rij */
 #composer {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  flex-wrap:nowrap; 
+   display: grid;
+   grid-template-columns: 1fr auto; /* input | knop */
+   align-items: center;
+   column-gap: 0.5rem;
+   width: 100%;
 }
 
 /* Invoerveld groeit mee */
 #composer #user-input {
-  flex: 1 1 0%;
-  min-width: 0;            /* voorkomt rare shrink-issues */
+  min-width: 0;            /* laat grid het veld vrij schalen */
+  width: 100%;             /* vul de 1fr-kolom volledig */
   height: 44px;
   padding: 0.75rem;
   border-radius: 6px;
@@ -71,9 +71,8 @@ h1 {
   outline: none;
 }
 
-/* knop krimpt niet mee en houdt eigen breedte */
-#composer #send-btn { flex: 0 0 auto; }
-}
+/* knop rechts, eigen breedte */
+#composer #send-btn { justify-self: end; }
 
 /* Verstuurknop */
 button {
