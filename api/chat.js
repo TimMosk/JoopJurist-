@@ -416,19 +416,13 @@ export default async function handler(req, res) {
     const missing = missingKeys(facts);
     let suggestions = [];
     
-    // 7f) Intent + concept beslissen (gate op intent/should_draft)
-    // ‘Graag/Ok’ na een aanbod van de assistent telt als expliciet akkoord om te draften
-    const userWants =
-    wantsDraft(message) ||
-    (isAffirmative(message) && assistantOfferedDraft(history));
-
-    // Relax: als óf het model óf de heuristiek “contract” ziet → contractmodus
-    const intent =
-    (llm.intent === "contract" || isContractIntentHeuristic(message))
-    ? "contract" : "general";
-    const shouldDraft = userWants || intent === "contract";
+    // 7f) Intent + concept beslissen (alleen op expliciet verzoek)
+    // Concept alléén tonen/aanmaken wanneer de gebruiker dat in dit bericht vraagt.
+    const userWants = wantsDraft(message);
+    // Intent alleen gebruiken voor vraag-sturing/suggesties (niet voor auto-render).
+    const intent = isContractIntentHeuristic(message) ? "contract" : "general";
     let concept = null;
-    let done = false;  
+    let done = false; 
     
     // Vergelijk enkel kernfeiten (excl. afgeleide velden zoals recht.* en forum.rechtbank)
     function coreFactsView(f){
@@ -447,25 +441,23 @@ export default async function handler(req, res) {
     const factsAfterCore  = JSON.stringify(coreFactsView(facts));
     const factsChangedCore = factsBeforeCore !== factsAfterCore;
 
-    // Render-regels:
-    // 1) Expliciet verzoek → altijd renderen (met placeholders als nodig)
-    // 2) Anders: in contractmodus renderen wanneer kernfeiten net zijn gewijzigd
+    // Render-regels (conservatief):
+    // Alleen bij expliciet verzoek renderen; anders nooit een concept meesturen.
     if (userWants && missing.length === 0) {
-      concept = renderConcept(facts, false);
+      concept = renderConcept(facts, false); // volledig
       done = true;
       llm.ask = null;
     } else if (userWants && missing.length > 0) {
-      concept = renderConcept(facts, true); // placeholders tonen
+      concept = renderConcept(facts, true);  // placeholders
       done = true;
-      llm.ask = `Zullen we dit eerst invullen: ${prettyLabel(missing[0])}?`;
-    } else if (shouldDraft && missing.length === 0 && factsChangedCore) {
-      concept = renderConcept(facts, false);
-      done = true;
-      llm.ask = null;
-    } else if (intent === "contract" && missing.length > 0) {
       llm.ask = `Zullen we dit eerst invullen: ${prettyLabel(missing[0])}?`;
     } else {
-      llm.ask = null; // algemene chat: nooit concept meesturen
+      // Geen expliciet verzoek → geen concept. Hoogstens 1 gerichte vraag.
+      if (intent === "contract" && missing.length > 0) {
+        llm.ask = `Zullen we dit eerst invullen: ${prettyLabel(missing[0])}?`;
+      } else {
+        llm.ask = null;
+      }
     }
 
     // 7g) Suggesties (alleen in contractmodus en met basisdata)
