@@ -34,8 +34,10 @@ h1 {
   overflow-y: auto;
   margin-bottom: .75rem;
   flex: 1 1 auto;                 /* neemt alle beschikbare hoogte */
+  min-height: 0;
   overscroll-behavior: contain;   /* geen rubberband naar body */
-  scroll-behavior: smooth;        /* nette scroll naar onder */
+  /* scroll-behavior hier uitzetten voorkomt conflicten met JS autoscroll */
+  scroll-behavior: auto;
 }
 
 /* Wrapper onder de chat */
