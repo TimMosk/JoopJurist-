@@ -108,10 +108,16 @@ const prettyLabel = k => ({
   "levering.plaats":"leveringsplaats"
 }[k] || k);
 
-// Let op: JS kent geen 'x' regex-flag; alles op één regel met alleen 'i'
-const wantsDraft = (msg = "") =>
-  /\b(?:(?:toon|laat.*zien|geef)\b.*\b(?:concept|conceptversie|voorbeeld(?:\s*contract)?|draft)\b|(?:concept|conceptversie|voorbeeld(?:\s*contract)?|opzet|draft)\b\s*(?:graag|alvast)?|(?:toon|laat.*zien)\b.*\b(?:koopovereenkomst|contract)\b)\b/i
-    .test(msg);
+// Strikt: alleen als de gebruiker expliciet om (concept/contract) vraagt
+const wantsDraft = (msg = "") => {
+  const s = (msg || "").toLowerCase().normalize("NFKD");
+  if (!s.trim()) return false;
+  const verb = /(toon|laat\s*zien|geef|stuur|maak|cre[eë]er|genereer|schrijf|stel\s*op|opstellen|bouw)/i.test(s);
+  const noun = /(concept|conceptversie|voorbeeld(?:\s*contract)?|opzet|koopovereenkomst|contract|clausule)/i.test(s);
+  const polite = /\b(mag ik|kun je|wil je|zou je)\b/i.test(s) && /(concept|voorbeeld|koopovereenkomst|contract)/i.test(s);
+  const shortcut = /\bconcept\s*(graag|alvast)?\b/i.test(s); // “concept graag”
+  return (verb && noun) || polite || shortcut;
+};
 
 // Intent-heuristiek: contract-gerichte trefwoorden
 const CONTRACT_KW_RE = /(koopovereenkomst|overeenkomst|contract|clausule|bepaling|opstellen|concept|voorbeeld|draft)/i;
@@ -441,8 +447,10 @@ export default async function handler(req, res) {
     const factsAfterCore  = JSON.stringify(coreFactsView(facts));
     const factsChangedCore = factsBeforeCore !== factsAfterCore;
 
-    // Render-regels (conservatief):
-    // Alleen bij expliciet verzoek renderen; anders nooit een concept meesturen.
+    // Render-regels:
+    // 1) Alleen bij expliciet verzoek renderen (userWants).
+    // 2) Als alle verplichte feiten compleet zijn maar er niet expliciet is gevraagd:
+    //    één keer toestemming vragen om het concept te maken (geen auto-render).
     if (userWants && missing.length === 0) {
       concept = renderConcept(facts, false); // volledig
       done = true;
@@ -451,13 +459,19 @@ export default async function handler(req, res) {
       concept = renderConcept(facts, true);  // placeholders
       done = true;
       llm.ask = `Zullen we dit eerst invullen: ${prettyLabel(missing[0])}?`;
-    } else {
-      // Geen expliciet verzoek → geen concept. Hoogstens 1 gerichte vraag.
-      if (intent === "contract" && missing.length > 0) {
-        llm.ask = `Zullen we dit eerst invullen: ${prettyLabel(missing[0])}?`;
+    } else if (missing.length === 0) {
+      // Alle kernfeiten zijn binnen, maar geen expliciet verzoek.
+      // Vraag 1× toestemming; herhaal niet als we dit net aanboden.
+      if (!assistantOfferedDraft(history)) {
+        llm.ask = "We hebben alle benodigde gegevens. Zal ik het concept van de koopovereenkomst voor je maken?";
       } else {
         llm.ask = null;
       }
+    } else if (intent === "contract" && missing.length > 0) {
+      // Nog niet compleet: vraag gericht om de eerstvolgende ontbrekende feit.
+      llm.ask = `Zullen we dit eerst invullen: ${prettyLabel(missing[0])}?`;
+    } else {
+      llm.ask = null; // algemene chat: geen concept en geen vraag
     }
 
     // 7g) Suggesties (alleen in contractmodus en met basisdata)
@@ -471,6 +485,8 @@ export default async function handler(req, res) {
       concept += `\n${extra}`;
     }
 
+    // Vraag (als die net is gezet) nog inline in 'say' duwen
+    normalizeSayAsk(llm);
     return res.status(200).json({
       say: llm.say || "Helder.",
       facts,
