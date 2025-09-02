@@ -9,11 +9,11 @@ body, input, button, h1 {
   padding: 0;
 }
 
-/* Container schaalt mooi mee */
+/* laat de pagina netjes opvullen: titel → chat → composer */
 .container {
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
 }
 
 /* Titel */
@@ -27,16 +27,46 @@ h1 {
   border: 1px solid #ccc;
   border-radius: 8px;
   padding: 1rem;
-  height: 60vh;
-  overflow-y: auto;
   background-color: #f9f9f9;
-  margin-bottom: 1rem;
+  overflow-y: auto;
+  margin-bottom: .75rem;
+  flex: 1 1 auto;                 /* neemt alle beschikbare hoogte */
+  overscroll-behavior: contain;   /* geen rubberband naar body */
+  scroll-behavior: smooth;        /* nette scroll naar onder */
 }
 
-/* Input en knop op één regel bij brede schermen */
-.input-container {
+/* Wrapper onder de chat */
+.input-container { 
+  position: sticky;   /* blijft onder in beeld */
+  bottom: 0;
+  background: #fff;
+  padding-top: .25rem;
+}
+
+/* Het formulier binnen de wrapper is de flex-rij */
+#composer {
   display: flex;
+  align-items: center;
   gap: 0.5rem;
+  width: 100%;
+}
+
+/* Invoerveld groeit mee */
+#composer #user-input {
+  flex: 1 1 auto;
+  min-width: 0;            /* voorkomt rare shrink-issues */
+  height: 44px;
+  padding: 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #aaa;
+  font-size: 1rem;
+}
+
+/* nette focus */
+#composer #user-input:focus {
+  border-color: #4b8df8;
+  box-shadow: 0 0 0 3px rgba(75,141,248,.15);
+  outline: none;
 }
 
 /* Invoerveld */
@@ -50,28 +80,26 @@ h1 {
 
 /* Verstuurknop */
 button {
-  padding: 0.75rem 1.2rem;
+  height: 44px;
+  padding: 0 1.2rem;
   border: none;
   border-radius: 6px;
   background-color: #0070f3;
-  color: white;
+  color: #fff;
   font-size: 1rem;
+  font-weight: 600;
   cursor: pointer;
 }
-
-button:hover {
-  background-color: #005ac1;
+button:hover { background-color: #005ac1; }
+button:disabled {
+  opacity: .6;
+  cursor: not-allowed;
 }
 
 /* 📱 Responsieve layout */
 @media (max-width: 600px) {
-  .input-container {
-    flex-direction: column;
-  }
-
-  button {
-    width: 100%;
-  }
+   #composer { flex-direction: column; }
+   #composer #send-btn { width: 100%; }
 }
 
 .message {
@@ -95,6 +123,13 @@ button:hover {
   word-wrap: break-word;
   /* voorkom overflow bij hele lange woorden/URL's */
   overflow-wrap: anywhere;
+}
+/* lange codeblokjes/quotes krijgen ook ademruimte */
+.formatted-output pre {
+  background: #f4f4f4;
+  border-radius: 8px;
+  padding: .75rem;
+  overflow-x: auto;
 }
 
 .message.user .bubble {
