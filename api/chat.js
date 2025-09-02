@@ -108,12 +108,10 @@ const prettyLabel = k => ({
   "levering.plaats":"leveringsplaats"
 }[k] || k);
 
-const wantsDraft = msg =>
-  /\b(
-     (toon|laat.*zien|geef)\b.*\b(concept|conceptversie|voorbeeld(contract)?|draft)\b
-     |(concept|conceptversie|voorbeeld(contract)?|opzet|draft)\b\s*(graag|alvast)?
-     |(toon|laat.*zien)\b.*\b(koopovereenkomst|contract)\b
-   )/ix.test(msg || "");
+// Let op: JS kent geen 'x' regex-flag; alles op één regel met alleen 'i'
+const wantsDraft = (msg = "") =>
+  /\b(?:(?:toon|laat.*zien|geef)\b.*\b(?:concept|conceptversie|voorbeeld(?:\s*contract)?|draft)\b|(?:concept|conceptversie|voorbeeld(?:\s*contract)?|opzet|draft)\b\s*(?:graag|alvast)?|(?:toon|laat.*zien)\b.*\b(?:koopovereenkomst|contract)\b)\b/i
+    .test(msg);
 
 // Intent-heuristiek: contract-gerichte trefwoorden
 const CONTRACT_KW_RE = /(koopovereenkomst|overeenkomst|contract|clausule|bepaling|opstellen|concept|voorbeeld|draft)/i;
@@ -282,7 +280,7 @@ facts = {
 }
 
 OUTPUT (STRICT JSON, zonder extra tekst):
-+{"say": string, "facts": object, "ask": string|null, "suggestions": [], "concept": null, "done": boolean, "intent":"contract"|"general"|"other", "should_draft": boolean}
+{"say": string, "facts": object, "ask": string|null, "suggestions": [], "concept": null, "done": boolean, "intent":"contract"|"general"|"other", "should_draft": boolean}
 `;
 
 async function callLLM({facts, history, message}) {
@@ -365,7 +363,6 @@ export default async function handler(req, res) {
         NOW = new Date(base.getTime() - offsetMin * 60 * 1000);
       }
     }
-    const NOW = clientNow ? new Date(clientNow) : new Date();
     // 7a) Fallback-extractie vóór de LLM-call
     const extracted = extractFactsFromMessage(message);
     const extractedDP = extractDatesPlaces(message, NOW);
