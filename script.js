@@ -11,22 +11,39 @@ const t = {
 
 const $ = s => document.querySelector(s);
 const escapeHtml = s => (s||"").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-const scrollToBottom = () => { const log=$("#chat-log"); log.scrollTop = log.scrollHeight; };
+
+// Sticky autoscroll: blijf onder als gebruiker niet omhoog is gescrolld
+let _stickToBottom = true;
+const _log = () => document.querySelector("#chat-log");
+const _isNearBottom = (el) => (el.scrollHeight - el.clientHeight - el.scrollTop) < 4;
+const scrollToBottom = (force=false) => {
+  const el = _log(); if (!el) return;
+  if (!force && !_stickToBottom && !_isNearBottom(el)) return;
+  // wacht tot DOM & layout klaar zijn
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    el.scrollTop = el.scrollHeight;
+  }));
+};
 
 function addUser(text){
-  $("#chat-log").innerHTML += `<div class="message user"><div class="bubble">💬 ${escapeHtml(text)}</div></div>`;
-  scrollToBottom();
+   const html = `<div class="message user"><div class="bubble">💬 ${escapeHtml(text)}</div></div>`;
+   $("#chat-log").insertAdjacentHTML("beforeend", html);
+   scrollToBottom();
 }
 function addAiMarkdown(md){
   const html = window.marked.parse(md);
-  $("#chat-log").innerHTML += `<div class="message ai"><div class="bubble formatted-output">⚖️ ${html}</div></div>`;
+  $("#chat-log").insertAdjacentHTML("beforeend",
+    `<div class="message ai"><div class="bubble formatted-output">⚖️ ${html}</div></div>`
+  );
   scrollToBottom();
 }
 function addTyping(){
   const el = document.createElement("div");
   el.className = "message ai"; el.id = "typing-indicator";
   el.innerHTML = `<div class="bubble typing">${t.typing}<span class="dots"></span></div>`;
-  $("#chat-log").appendChild(el); scrollToBottom(); return el;
+  $("#chat-log").appendChild(el);
+  scrollToBottom();
+  return el;
 }
 
 let facts = {};         // optioneel lokaal; server mag ook masteren
@@ -87,8 +104,15 @@ if (!data || typeof data !== "object") {
 
 const parts = [];
 if (data.say) parts.push(data.say);
-if (!data.concept && data.ask) parts.push(`_${data.ask}_`); // vraag cursief, zelfde bubbel
-
+// Vraag NIET cursief en liefst in dezelfde bubbel.
+if (data.ask) {
+  if (parts.length) {
+    parts[0] = parts[0].replace(/\s*$/, '') + (/[?.!…]$/.test(parts[0]) ? ' ' : ' ') + data.ask;
+  } else {
+    parts.push(data.ask);
+  }
+}
+  
 if (parts.length) {
   const oneBubble = parts.join("\n\n");
   addAiMarkdown(oneBubble);
@@ -138,4 +162,12 @@ window.addEventListener("DOMContentLoaded", ()=>{
     form.dataset.bound = "1";
   }
   addAiMarkdown("Ik ben **JoopJurist**. Vertel in je eigen woorden wat je wil regelen; ik denk mee, vul aan en stel de juiste vragen.");
+
+  // Sticky autoscroll: als user omhoog scrolt, niet meer auto-naar-onderen
+  const log = document.querySelector("#chat-log");
+  if (log) {
+    log.addEventListener("scroll", () => {
+      _stickToBottom = _isNearBottom(log);
+    });
+  }
 });
