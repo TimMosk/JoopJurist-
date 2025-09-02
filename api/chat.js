@@ -309,17 +309,18 @@ async function callLLM({facts, history, message}) {
 function normalizeSayAsk(llm) {
   if (!llm) return;
 
-  // verplaats vraag in 'say' naar 'ask'
-  if (llm.say && llm.say.includes("?")) {
-    const idx = llm.say.lastIndexOf("?");
-    const before = llm.say.slice(0, idx).trim();
-    const q = llm.say.slice(idx).trim();
-    llm.say = before.replace(/[–—-]\s*$/, "").trim();
-    if (!llm.ask) {
-      const cleaned = q.replace(/^[?.!\s-]+/, "").trim();
-      if (cleaned) llm.ask = cleaned.endsWith("?") ? cleaned : cleaned + "?";
+  // verplaats de hele laatste vraagzin uit 'say' naar 'ask'
+  if (llm.say && /\?/.test(llm.say)) {
+    // match: laatste segment dat eindigt op '?'
+    const m = llm.say.match(/([^?.!]*\?)\s*$/);
+    if (m) {
+      const qFull = m[1].trim();                                     // volledige vraagzin
+      const before = llm.say.slice(0, llm.say.length - m[0].length);  // 'say' zonder de vraag
+      llm.say = before.replace(/[–—-]\s*$/, "").trim();
+      if (!llm.ask || !llm.ask.trim()) llm.ask = qFull;
     }
   }
+
   // dubbele/lege ask → null
   if (llm.ask) {
     const norm = s => (s || "").replace(/\W+/g, "").toLowerCase();
@@ -327,12 +328,16 @@ function normalizeSayAsk(llm) {
       llm.ask = null;
     }
   }
-  // >>> NIEUW: vraag inline in 'say' zetten i.p.v. apart 'ask' veld <<<
+  // Inline de vraag in 'say' (om cursief/nieuwe regel in de UI te vermijden),
+  // maar alleen als 'say' die vraag nog NIET al bevat.
   if (llm.ask && llm.ask.trim()) {
-    const sep = llm.say && !/[?.!…]$/.test(llm.say) ? " — " : " ";
     const q = llm.ask.trim().replace(/\s*\?+$/, "?");
-    llm.say = (llm.say || "").trim() + sep + q;
-    llm.ask = null; // voorkom aparte (schuine) render in de UI
+    const alreadyHas = (llm.say || "").includes(q);
+    if (!alreadyHas) {
+      const sep = llm.say && !/[?.!…]$/.test(llm.say) ? ". " : " ";
+      llm.say = (llm.say || "").trim() + sep + q;
+    }
+    llm.ask = null; // UI toont geen aparte (schuine) ask
   }
 }
 
@@ -505,6 +510,7 @@ Verkoper verklaart eigenaar te zijn en dat het object vrij is van beslagen en be
 **5. Toepasselijk recht en forumkeuze**
 Op deze overeenkomst is **Nederlands recht** van toepassing.
 Geschillen worden exclusief voorgelegd aan de **${forum}**.
+
 
 **Ondertekening**
 
