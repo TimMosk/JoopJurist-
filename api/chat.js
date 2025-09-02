@@ -119,7 +119,20 @@ function isContractIntentHeuristic(msg=""){
   // Alleen huidige bericht gebruiken; geen “sticky intent” uit de history
   if (wantsDraft(msg)) return true;
   return CONTRACT_KW_RE.test(msg || "");
- }
+}
+
+// Affirmatief antwoord van de gebruiker? ("ja", "graag", "ok", "doe maar", ...)
+function isAffirmative(msg = "") {
+  return /\b(ja|jazeker|graag|ok(?:é)?|prima|doe maar|klopt|yes)\b/i.test(msg || "");
+}
+
+// Heeft de assistent in de vorige beurt een concept/contract aangeboden?
+function assistantOfferedDraft(history = []) {
+  const lastA = [...(history || [])]
+    .reverse()
+    .find(m => m.role === "assistant")?.content || "";
+  return /(concept|koopovereenkomst|contract)/i.test(lastA);
+}
 
 function detectCategory(facts){
   const s = (facts?.object?.omschrijving || "").toLowerCase();
@@ -404,14 +417,19 @@ export default async function handler(req, res) {
     let suggestions = [];
     
     // 7f) Intent + concept beslissen (gate op intent/should_draft)
-    const userWants = wantsDraft(message);
-    
-    // Intent alleen op basis van huidige user-input (of model, maar alleen als die “contract” zegt én de heuristiek het bevestigt)
-    const intentHeur = isContractIntentHeuristic(message) ? "contract" : "general";
-    const intent = (llm.intent === "contract" && intentHeur === "contract") ? "contract" : intentHeur;
+    // ‘Graag/Ok’ na een aanbod van de assistent telt als expliciet akkoord om te draften
+    const userWants =
+    wantsDraft(message) ||
+    (isAffirmative(message) && assistantOfferedDraft(history));
+
+    // Relax: als óf het model óf de heuristiek “contract” ziet → contractmodus
+    const intent =
+    (llm.intent === "contract" || isContractIntentHeuristic(message))
+    ? "contract" : "general";
     const shouldDraft = userWants || intent === "contract";
     let concept = null;
-    let done = false;
+    let done = false;  
+    
     // Vergelijk enkel kernfeiten (excl. afgeleide velden zoals recht.* en forum.rechtbank)
     function coreFactsView(f){
       const v = (p)=>get(f,p);
@@ -430,24 +448,24 @@ export default async function handler(req, res) {
     const factsChangedCore = factsBeforeCore !== factsAfterCore;
 
     // Render-regels:
-    // 1) Altijd renderen bij expliciet verzoek (userWants); placeholders als er nog iets mist
-    // 2) Anders alleen renderen in contract-modus én wanneer kernfeiten net gewijzigd zijn
+    // 1) Expliciet verzoek → altijd renderen (met placeholders als nodig)
+    // 2) Anders: in contractmodus renderen wanneer kernfeiten net zijn gewijzigd
     if (userWants && missing.length === 0) {
       concept = renderConcept(facts, false);
       done = true;
       llm.ask = null;
     } else if (userWants && missing.length > 0) {
-      concept = renderConcept(facts, true);
+      concept = renderConcept(facts, true); // placeholders tonen
       done = true;
-      llm.ask = llm.ask || `Wil je eerst **${prettyLabel(missing[0])}** geven?`;
-    } else if (shouldDraft && intent === "contract" && missing.length === 0 && factsChangedCore) {
+      llm.ask = `Zullen we dit eerst invullen: ${prettyLabel(missing[0])}?`;
+    } else if (shouldDraft && missing.length === 0 && factsChangedCore) {
       concept = renderConcept(facts, false);
       done = true;
       llm.ask = null;
-    } else if (intent === "contract") {
-      llm.ask = llm.ask || `Zullen we dit eerst invullen: **${prettyLabel(missing[0])}**?`;
+    } else if (intent === "contract" && missing.length > 0) {
+      llm.ask = `Zullen we dit eerst invullen: ${prettyLabel(missing[0])}?`;
     } else {
-      llm.ask = llm.ask || null; // algemene chat: nooit concept meesturen
+      llm.ask = null; // algemene chat: nooit concept meesturen
     }
 
     // 7g) Suggesties (alleen in contractmodus en met basisdata)
