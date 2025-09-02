@@ -42,6 +42,7 @@ h1 {
   background: #fff;
   padding-top: .25rem;
   width:100%;
+  display: block;
 }
 
 /* Composer-rij met FLEX (betrouwbaar naast knop in alle browsers) */
@@ -63,8 +64,9 @@ h1 {
   font-size: 1rem;
 }
 
-/* Fallback: ook als #composer onverhoopt mist, maak input breed in de rij */
-.input-container > input#user-input {
+/* Fallback: ook als #composer onverhoopt mist of er wrappers tussen zitten */
+.input-container input#user-input {
+  display: block;
   width: 100%;
   height: 44px;
 }
