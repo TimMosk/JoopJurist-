@@ -41,6 +41,7 @@ h1 {
   bottom: 0;
   background: #fff;
   padding-top: .25rem;
+  width:100%;
 }
 
 /* Het formulier binnen de wrapper is de flex-rij */
@@ -49,11 +50,12 @@ h1 {
   align-items: center;
   gap: 0.5rem;
   width: 100%;
+  flex-wrap:nowrap; 
 }
 
 /* Invoerveld groeit mee */
 #composer #user-input {
-  flex: 1 1 auto;
+  flex: 1 1 0%;
   min-width: 0;            /* voorkomt rare shrink-issues */
   height: 44px;
   padding: 0.75rem;
@@ -69,13 +71,8 @@ h1 {
   outline: none;
 }
 
-/* Invoerveld */
-#user-input {
-  flex: 1;
-  padding: 0.75rem;
-  border-radius: 6px;
-  border: 1px solid #aaa;
-  font-size: 1rem;
+/* knop krimpt niet mee en houdt eigen breedte */
+#composer #send-btn { flex: 0 0 auto; }
 }
 
 /* Verstuurknop */
