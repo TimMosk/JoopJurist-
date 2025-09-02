@@ -14,7 +14,7 @@ body, input, button, h1 {
   display: flex;
   flex-direction: column;
   min-height: 100dvh;
-  max-width: 800px;   /* <— zoals voorheen */
+  max-width: 600px;   /* <— zoals voorheen */
   width: 100%;
   margin: 0 auto;     /* <— centreert horizontaal */
   padding: 1rem;      /* binnenmarges */
