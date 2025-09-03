@@ -79,8 +79,10 @@ function mergeFacts(oldF={}, newF={}){ const out=JSON.parse(JSON.stringify(oldF)
 // --- Centralised vocabulary for draft detection ---
 const DRAFT_TERMS = "(concept|koopovereenkomst|overeenkomst|koopcontract|contract|contracttekst|document)";
 const DRAFT_TERMS_RE = new RegExp(`\\b${DRAFT_TERMS}\\b`, "i");
-const DRAFT_VERBS_RE = /\b(opstellen|maken|genereren|schrijven)\b/i;
-const HERE_IS_RE     = /\b(hier is|onderstaand|bijgaand|hierbij|onderstaande|zie hieronder)\b/i;
+// Herken ook vervoegingen: maak/maakt, opgesteld, genereert, etc.
+const DRAFT_VERBS_RE = /\b(opstel\w*|maak\w*|genereer\w*|schrijf\w*)\b/i;
+// Meer varianten zodat "Hier heb je / bij deze / alsjeblieft / zie onder" ook werkt
+const HERE_IS_RE     = /\b(hier is|hier heb je|bijgaand|hierbij|bij deze|onderstaand|onderstaande|zie hieronder|zie onder|vind je hieronder|alsjeblieft|alstublieft|voilà)\b/i;
 
 // Model claimt dat het concept nu volgt/eronder staat
 function llmClaimsDraft(s = "") {
@@ -94,6 +96,30 @@ function llmWillDraft(s = "") {
   return /\b(ik\s+ga|ik\s+zal|we\s+gaan|we\s+zullen)\b/i.test(t) &&
          DRAFT_TERMS_RE.test(t) &&
          DRAFT_VERBS_RE.test(t);
+}
+
+// Declaratieve belofte met voornaamwoord i.p.v. "contract/overeenkomst"
+// vb: "Top, ik maak 'm nu", "We stellen het nu op"
+function llmWillDraftPronoun(s = "") {
+  const t = (s || "").toLowerCase();
+  const pron = /\b(het|dit|deze|’m|'m|hem)\b/.test(t);
+  const will = /\b(ik\s+ga|ik\s+zal|we\s+gaan|we\s+zullen|ik\s+maak|we\s+maken|ik\s+genereer|we\s+genereren|ik\s+stel|we\s+stellen)\b/.test(t);
+  return pron && will && DRAFT_VERBS_RE.test(t);
+}
+
+// Model stelt dat het al AF is / zojuist opgesteld
+function llmHasDrafted(s = "") {
+  const t = s || "";
+  // bv. "Ik heb de overeenkomst opgesteld", "De koopovereenkomst is klaar/gereed"
+  return DRAFT_TERMS_RE.test(t) &&
+         /\b(opgesteld|gemaakt|gegenereerd|geschreven|klaar|gereed|staat hieronder|staat eronder)\b/i.test(t);
+}
+
+// Perfectum/af-melding met voornaamwoord
+function llmHasDraftedPronoun(s = "") {
+  const t = (s || "").toLowerCase();
+  return /\b(het|dit|deze|’m|'m|hem)\b/.test(t) &&
+         /\b(opgesteld|gemaakt|gegenereerd|geschreven|klaar|gereed|staat hieronder|staat eronder)\b/.test(t);
 }
 
 // Laatste assistant-tekst uit de history (werkt ook als content een object is)
@@ -171,11 +197,13 @@ function isAffirmative(msg = "") {
   if (!s) return false;
   // duidelijke ontkenningen eerst
   if (/\b(nee|niet|liever niet|geen|nog niet|stop|wacht|nope|nah)\b/.test(s)) return false;
+  // emoji & korte bevestigers (ook "top")
+  if (/(^|\s)(👍|👌|✅|✔️|☑️|✌️|🙌|👏)(\s|$)/.test(msg)) return true;
   const yesPhrases = [
     "ja","jazeker","zeker","tuurlijk","natuurlijk","prima","akkoord",
     "ok","oke","oké","okay","okey","yes","yup","sure","please","pls",
-    "doe maar","ga door","ga je gang","go ahead","is goed",
-    "graag","heel graag","graag hoor"
+    "doe maar","ga maar","ga door","ga je gang","go ahead","is goed",
+    "graag","heel graag","graag hoor","top","helemaal goed","klinkt goed"
   ];
   return yesPhrases.some(p =>
     new RegExp(`\\b${p.replace(/\s+/g,"\\s+")}\\b`, "i").test(s)
@@ -482,33 +510,28 @@ export default async function handler(req, res) {
     // 7f) Intent + concept beslissen (alleen op expliciet verzoek)
     // Concept alléén tonen/aanmaken wanneer de gebruiker dat in dit bericht vraagt.
     // of wanneer hij net "ja/graag/ok" heeft gezegd op een aanbod/toestemmingsvraag.
-    
+
     const modelClaims = llmClaimsDraft(llm.say);
     const modelWillDraft = llmWillDraft(llm.say);
+    const modelWillDraftPron = llmWillDraftPronoun(llm.say);
+    const modelHasDrafted = llmHasDrafted(llm.say);
+    const modelHasDraftedPron = llmHasDraftedPronoun(llm.say);
     const modelShould = !!llm.should_draft;
     // Bepaal intent + init variabelen (declareer deze SLECHTS ÉÉN keer)
     const intent = isContractIntentHeuristic(message) ? "contract" : "general";
     let concept = null;
     let done = false;
     
-    // 🔒 HARD GATE: gebruiker bevestigt zójuist op een toestemmingsvraag → meteen renderen
+    // 🔒 Toestemming net gegeven?
     const permissionJustGranted = isAffirmative(message) && assistantAskedPermission(history);
-    if (permissionJustGranted) {
-    const usePH = missing.length > 0;
-    concept = renderConcept(facts, usePH);
-    done = true;
-    llm.say = usePH
-    ? "Hier is het concept van de koopovereenkomst met invulplekken waar nog gegevens ontbreken."
-    : "Hier is het concept van de koopovereenkomst.";
-    llm.ask = usePH ? `Zullen we dit eerst invullen: ${prettyLabel(missing[0])}?` : null;
-    }
 
-    // Expliciete wens (of bevestiging op aanbod / “ik ga ’m opstellen”-belofte)
-    const userWants =
+    // ✅ Eén samenhangende poort: als één van deze signalen waar is → render NU
+    const mustRenderNow =
+      modelClaims || modelHasDrafted || modelHasDraftedPron ||
+      modelWillDraft || modelWillDraftPron || modelShould ||
       wantsDraft(message) ||
-      modelShould ||
-      (isAffirmative(message) && (assistantOfferedDraft(history) || assistantAskedPermission(history))) ||
-      modelWillDraft || modelClaims;
+      permissionJustGranted ||
+      (isAffirmative(message) && assistantOfferedDraft(history));
         
     // Vergelijk enkel kernfeiten (excl. afgeleide velden zoals recht.* en forum.rechtbank)
     
@@ -516,11 +539,11 @@ export default async function handler(req, res) {
     // 1) Alleen bij expliciet verzoek renderen (userWants).
     // 2) Als alle verplichte feiten compleet zijn maar er niet expliciet is gevraagd:
     //    één keer toestemming vragen om het concept te maken (geen auto-render).
-    if (!concept && userWants && missing.length === 0) {
+    if (!concept && userRenderNow && missing.length === 0) {
       concept = renderConcept(facts, false); // volledig
       done = true;
       llm.ask = null;
-    } else if (!concept && userWants && missing.length > 0) {
+    } else if (!concept && userRenderNow && missing.length > 0) {
       concept = renderConcept(facts, true);  // placeholders
       done = true;
       llm.ask = `Zullen we dit eerst invullen: ${prettyLabel(missing[0])}?`;
@@ -544,9 +567,9 @@ export default async function handler(req, res) {
         ? "Hier is het concept van de koopovereenkomst met invulplekken waar nog gegevens ontbreken."
         : "Hier is het concept van de koopovereenkomst.";
     }
-    
-    // ✅ Failsafe: model claimt dat het concept (nu) komt → render en zeg “Hier is…”
-    if (!concept && (modelClaims || modelWillDraft)) {
+
+    // ✅ Failsafe: extra vangnet op claims/belofte
+    if (!concept && (modelClaims || modelWillDraft || modelHasDrafted || modelHasDraftedPron)) {
       const usePH = missing.length > 0;
       concept = renderConcept(facts, usePH);
       done = true;
