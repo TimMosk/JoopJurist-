@@ -505,20 +505,14 @@ export default async function handler(req, res) {
       llm.ask = null; // algemene chat: geen concept en geen vraag
     }
 
-    // ✅ Failsafe: als gebruiker zojuist bevestigde en we toch geen concept meesturen,
-    // forceer het renderen (met placeholders indien nodig).
-    if (!concept && userWants) {
-      concept = renderConcept(facts, missing.length > 0);
-      done = true;
-      llm.ask = null;
-    }
-    
-    // 🔒 Safety: model claimt "Hier is/onderstaand/bijgaand het concept",
-    // maar we sturen géén concept mee → maak er een toestemming-vraag van.
-    if (!concept && modelClaims) {
-      llm.say = "We hebben alle benodigde gegevens. Zal ik het concept van de koopovereenkomst voor je maken?";
-      llm.ask = null; // vraag zit (na normalize) in 'say'
-    }
+   // ✅ Failsafe: als gebruiker bevestigt OF het model claimt dat het concept komt,
+   // render dan sowieso (met placeholders indien nodig).
+  if (!concept && (userWants || modelClaims)) {
+  const usePH = missing.length > 0;
+  concept = renderConcept(facts, usePH);
+  done = true;
+  llm.ask = usePH ? `Zullen we dit eerst invullen: ${prettyLabel(missing[0])}?` : null;
+}
     
     // 7g) Suggesties (alleen in contractmodus en met basisdata)
     const canSuggest = !!get(facts,"object.omschrijving") && get(facts,"prijs.bedrag") != null;
