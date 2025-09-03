@@ -70,15 +70,26 @@ const CATALOG = [
 ];
 
 // 3) Utils
-+// Herken dat het model in deze beurt zegt dat er een concept komt
-+function llmClaimsDraft(s = "") {
-+  return /\b(hier is|onderstaand|bijgaand)\b[^.]*\b(concept|koopovereenkomst|contract)\b/i.test(s || "");
-+}
-
 const PH = "*[●nader aan te vullen●]*";
 const get = (o,p)=>p.split(".").reduce((x,k)=>x&&x[k],o);
 function set(obj, p, val){ const a=p.split("."); let o=obj; for(let i=0;i<a.length-1;i++){ if(!o[a[i]]) o[a[i]]={}; o=o[a[i]]; } o[a[a.length-1]]=val; }
 function mergeFacts(oldF={}, newF={}){ const out=JSON.parse(JSON.stringify(oldF)); (function rec(s,pre=""){ for(const k of Object.keys(s||{})){ const v=s[k], path=pre?`${pre}.${k}`:k; if(v&&typeof v==="object"&&!Array.isArray(v)){ if(!get(out,path)) set(out,path,{}); rec(v,path);} else { set(out,path,v);} } })(newF); return out; }
+
+// Herken dat het model in deze beurt claimt dat er nu een concept komt
+function llmClaimsDraft(s = "") {
+  return /\b(hier is|onderstaand|bijgaand)\b[^.]*\b(concept|koopovereenkomst|contract)\b/i.test(s || "");
+}
+
+// Laatste assistant-tekst uit de history
+function lastAssistantText(history = []) {
+  return [...(history || [])].reverse().find(m => m.role === "assistant")?.content || "";
+}
+
+// Herken expliciete toestemmingsvraag in de vorige beurt
+function assistantAskedPermission(history = []) {
+  const txt = lastAssistantText(history);
+  return /\b(zal\s*ik|zullen\s*we)\b[^.?]*(concept|koopovereenkomst|contract)[^.?!]*(maken|opstellen|genereren|schrijven)/i.test(txt);
+}
 
 function nearestCourt(place=""){
   const s = (place||"").toLowerCase();
@@ -132,17 +143,26 @@ function isContractIntentHeuristic(msg=""){
   return CONTRACT_KW_RE.test(msg || "");
 }
 
-// Affirmatief antwoord van de gebruiker? ("ja", "graag", "ok", "doe maar", ...)
+// Affirmatief antwoord van de gebruiker? (heel graag, tuurlijk, natuurlijk, sure, go ahead, etc.)
 function isAffirmative(msg = "") {
-  return /\b(ja|jazeker|graag|ok(?:é)?|prima|doe maar|klopt|yes)\b/i.test(msg || "");
+  const s = (msg || "").toLowerCase().normalize("nfkd").trim();
+  if (!s) return false;
+  // duidelijke ontkenningen eerst
+  if (/\b(nee|niet|liever niet|geen|nog niet|stop|wacht|nope|nah)\b/.test(s)) return false;
+  const yesPhrases = [
+    "ja","jazeker","zeker","tuurlijk","natuurlijk","prima","akkoord",
+    "ok","oke","oké","okay","okey","yes","yup","sure","please","pls",
+    "doe maar","ga door","ga je gang","go ahead","is goed",
+    "graag","heel graag","graag hoor"
+  ];
+  return yesPhrases.some(p =>
+    new RegExp(`\\b${p.replace(/\s+/g,"\\s+")}\\b`, "i").test(s)
+  );
 }
 
 // Heeft de assistent in de vorige beurt een concept/contract aangeboden?
 function assistantOfferedDraft(history = []) {
-  const lastA = [...(history || [])]
-    .reverse()
-    .find(m => m.role === "assistant")?.content || "";
-  return /(concept|koopovereenkomst|contract)/i.test(lastA);
+  return /(concept|koopovereenkomst|contract)/i.test(lastAssistantText(history));
 }
 
 function detectCategory(facts){
@@ -404,8 +424,7 @@ export default async function handler(req, res) {
     // 7b) LLM-analyse (met preFacts) + normaliseren
     const llm = await callLLM({ facts: preFacts, history, message });
     normalizeSayAsk(llm);
-    const modelClaimsDraft = llmClaimsDraft(llm.say);
-    
+        
     // 7c) Facts samenvoegen + vaste rechtsbasis + forum
     let facts = mergeFacts(preFacts, llm.facts || {});
     set(facts, "recht.toepasselijk", "Nederlands recht");
@@ -430,12 +449,13 @@ export default async function handler(req, res) {
     
     // 7f) Intent + concept beslissen (alleen op expliciet verzoek)
     // Concept alléén tonen/aanmaken wanneer de gebruiker dat in dit bericht vraagt.
-    const userWants =
-    // expliciet gevraagd in de user-tekst
-    wantsDraft(message)
-    // of: gebruiker zegt "ja/ok/graag" nadat óf de vorige beurt óf deze beurt een aanbod is gedaan
-    || (isAffirmative(message) && (assistantOfferedDraft(history) || modelClaimsDraft));
+    // of wanneer hij net "ja/graag/ok" heeft gezegd op een aanbod/toestemmingsvraag.
     
+    const modelClaims = llmClaimsDraft(llm.say);
+    const userWants =
+      wantsDraft(message) ||
+      (isAffirmative(message) && (assistantOfferedDraft(history) || assistantAskedPermission(history) || modelClaims));
+        
     // Intent alleen gebruiken voor vraag-sturing/suggesties (niet voor auto-render).
     const intent = isContractIntentHeuristic(message) ? "contract" : "general";
     let concept = null;
@@ -485,9 +505,17 @@ export default async function handler(req, res) {
       llm.ask = null; // algemene chat: geen concept en geen vraag
     }
 
+    // ✅ Failsafe: als gebruiker zojuist bevestigde en we toch geen concept meesturen,
+    // forceer het renderen (met placeholders indien nodig).
+    if (!concept && userWants) {
+      concept = renderConcept(facts, missing.length > 0);
+      done = true;
+      llm.ask = null;
+    }
+    
     // 🔒 Safety: model claimt "Hier is/onderstaand/bijgaand het concept",
     // maar we sturen géén concept mee → maak er een toestemming-vraag van.
-    if (!concept && modelClaimsDraft) {
+    if (!concept && modelClaims) {
       llm.say = "We hebben alle benodigde gegevens. Zal ik het concept van de koopovereenkomst voor je maken?";
       llm.ask = null; // vraag zit (na normalize) in 'say'
     }
