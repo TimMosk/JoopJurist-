@@ -459,9 +459,8 @@ export default async function handler(req, res) {
     
     const modelClaims = llmClaimsDraft(llm.say);
     const modelWillDraft = llmWillDraft(llm.say);
-    // Bepaal intent
+    // Bepaal intent + init variabelen (declareer deze SLECHTS ÉÉN keer)
     const intent = isContractIntentHeuristic(message) ? "contract" : "general";
-    // Declareer eerst de velden die we mogelijk zo meteen invullen
     let concept = null;
     let done = false;
     
@@ -482,11 +481,6 @@ export default async function handler(req, res) {
     wantsDraft(message) ||
     (isAffirmative(message) && (assistantOfferedDraft(history) || assistantAskedPermission(history) || modelWillDraft));
         
-    // Intent alleen gebruiken voor vraag-sturing/suggesties (niet voor auto-render).
-    const intent = isContractIntentHeuristic(message) ? "contract" : "general";
-    let concept = null;
-    let done = false; 
-    
     // Vergelijk enkel kernfeiten (excl. afgeleide velden zoals recht.* en forum.rechtbank)
     function coreFactsView(f){
       const v = (p)=>get(f,p);
@@ -530,14 +524,16 @@ export default async function handler(req, res) {
       llm.ask = null; // algemene chat: geen concept en geen vraag
     }
 
-   // ✅ Failsafe: als gebruiker bevestigt OF het model claimt dat het concept komt,
-   // render dan sowieso (met placeholders indien nodig).
-  if (!concept && (modelClaims || modelWillDraft)) {
-  const usePH = missing.length > 0;
-  concept = renderConcept(facts, usePH);
-  done = true;
-  llm.ask = usePH ? `Zullen we dit eerst invullen: ${prettyLabel(missing[0])}?` : null;
-}
+    // ✅ Failsafe: model claimt dat het concept (nu) komt → render en zeg “Hier is…”
+    if (!concept && (modelClaims || modelWillDraft)) {
+      const usePH = missing.length > 0;
+      concept = renderConcept(facts, usePH);
+      done = true;
+      llm.say = usePH
+        ? "Hier is het concept van de koopovereenkomst met invulplekken waar nog gegevens ontbreken."
+        : "Hier is het concept van de koopovereenkomst.";
+      llm.ask = usePH ? `Zullen we dit eerst invullen: ${prettyLabel(missing[0])}?` : null;
+    }
     
     // 7g) Suggesties (alleen in contractmodus en met basisdata)
     const canSuggest = !!get(facts,"object.omschrijving") && get(facts,"prijs.bedrag") != null;
