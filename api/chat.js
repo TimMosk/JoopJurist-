@@ -452,9 +452,10 @@ export default async function handler(req, res) {
     // of wanneer hij net "ja/graag/ok" heeft gezegd op een aanbod/toestemmingsvraag.
     
     const modelClaims = llmClaimsDraft(llm.say);
+    const modelWillDraft = llmWillDraft(llm.say);
     const userWants =
       wantsDraft(message) ||
-      (isAffirmative(message) && (assistantOfferedDraft(history) || assistantAskedPermission(history) || modelClaims));
+      (isAffirmative(message) && (assistantOfferedDraft(history) || assistantAskedPermission(history) || modelWillDraft));
         
     // Intent alleen gebruiken voor vraag-sturing/suggesties (niet voor auto-render).
     const intent = isContractIntentHeuristic(message) ? "contract" : "general";
@@ -507,7 +508,7 @@ export default async function handler(req, res) {
 
    // ✅ Failsafe: als gebruiker bevestigt OF het model claimt dat het concept komt,
    // render dan sowieso (met placeholders indien nodig).
-  if (!concept && (userWants || modelClaims)) {
+  if (!concept && (userWants || modelClaims || modelWillDraft)) {
   const usePH = missing.length > 0;
   concept = renderConcept(facts, usePH);
   done = true;
