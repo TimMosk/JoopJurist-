@@ -77,7 +77,7 @@ function mergeFacts(oldF={}, newF={}){ const out=JSON.parse(JSON.stringify(oldF)
 
 // Herken dat het model in deze beurt claimt dat er nu een concept komt
 function llmClaimsDraft(s = "") {
-  return /\b(hier is|onderstaand|bijgaand)\b[^.]*\b(concept|koopovereenkomst|contract)\b/i.test(s || "");
+  return /\b(hier is|onderstaand|bijgaand|hierbij|onderstaande|zie hieronder)\b[^.]*\b(concept|koopovereenkomst|contract)\b/i.test(s || "");
 }
 
 // Model belooft het concept te gaan opstellen/maken
@@ -482,20 +482,6 @@ export default async function handler(req, res) {
     (isAffirmative(message) && (assistantOfferedDraft(history) || assistantAskedPermission(history) || modelWillDraft));
         
     // Vergelijk enkel kernfeiten (excl. afgeleide velden zoals recht.* en forum.rechtbank)
-    function coreFactsView(f){
-      const v = (p)=>get(f,p);
-      return {
-        koper:{naam:v("koper.naam"),adres:v("koper.adres")},
-        verkoper:{naam:v("verkoper.naam"),adres:v("verkoper.adres")},
-        object:{omschrijving:v("object.omschrijving"),conditie:v("object.conditie"),identifiers:v("object.identifiers")},
-        prijs:{bedrag:v("prijs.bedrag")},
-        levering:{datum:v("levering.datum"),plaats:v("levering.plaats")},
-        // géén forum.rechtbank en géén recht.*, die worden afgeleid
-        betaling:{wijze:v("betaling.wijze"),moment:v("betaling.moment")}
-      };
-    }
-    const factsBeforeCore = JSON.stringify(coreFactsView(preFacts));
-    const factsAfterCore  = JSON.stringify(coreFactsView(facts));
     
     // Render-regels:
     // 1) Alleen bij expliciet verzoek renderen (userWants).
@@ -523,7 +509,13 @@ export default async function handler(req, res) {
     } else {
       llm.ask = null; // algemene chat: geen concept en geen vraag
     }
-
+    
+    if (concept && done && !/hier\s+is\b/i.test(llm.say || "")) {
+      llm.say = missing.length > 0
+        ? "Hier is het concept van de koopovereenkomst met invulplekken waar nog gegevens ontbreken."
+        : "Hier is het concept van de koopovereenkomst.";
+    }
+    
     // ✅ Failsafe: model claimt dat het concept (nu) komt → render en zeg “Hier is…”
     if (!concept && (modelClaims || modelWillDraft)) {
       const usePH = missing.length > 0;
