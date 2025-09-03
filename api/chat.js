@@ -86,11 +86,6 @@ function llmWillDraft(s = "") {
     .test(s || "");
 }
 
-// Laatste assistant-tekst uit de history
-function lastAssistantText(history = []) {
-  return [...(history || [])].reverse().find(m => m.role === "assistant")?.content || "";
-}
-
 // Laatste assistant-tekst uit de history (werkt ook als content een object is)
 function lastAssistantText(history = []) {
   const msg = [...(history || [])].reverse().find(m => m.role === "assistant");
