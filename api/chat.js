@@ -215,6 +215,14 @@ function assistantOfferedDraft(history = []) {
   return DRAFT_TERMS_RE.test(lastAssistantText(history));
 }
 
+// Aanbod/stelling in vorige beurt met voornaamwoord (bv. "ik maak 'm nu")
+function assistantOfferedDraftPronoun(history = []) {
+  const t = (lastAssistantText(history) || "").toLowerCase();
+  const pron = /\b(het|dit|deze|’m|'m|hem)\b/.test(t);
+  const promise = /\b(ik\s+ga|ik\s+zal|we\s+gaan|we\s+zullen|ik\s+maak|we\s+maken|ik\s+genereer|we\s+genereren|ik\s+stel|we\s+stellen)\b/.test(t);
+  return pron && promise && DRAFT_VERBS_RE.test(t);
+}
+
 // Vroeg de assistent zojuist expliciet om toestemming om te gaan opstellen?
 function assistantAskedPermission(history = []) {
   const t = (lastAssistantText(history) || "").toLowerCase();
@@ -531,7 +539,7 @@ export default async function handler(req, res) {
       modelWillDraft || modelWillDraftPron || modelShould ||
       wantsDraft(message) ||
       permissionJustGranted ||
-      (isAffirmative(message) && assistantOfferedDraft(history));
+      (isAffirmative(message) && assistantOfferedDraft(history)) || assistantOfferedDraftPronoun(history)));;
         
     // Vergelijk enkel kernfeiten (excl. afgeleide velden zoals recht.* en forum.rechtbank)
     
