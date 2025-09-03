@@ -80,6 +80,12 @@ function llmClaimsDraft(s = "") {
   return /\b(hier is|onderstaand|bijgaand)\b[^.]*\b(concept|koopovereenkomst|contract)\b/i.test(s || "");
 }
 
+// Model belooft het concept te gaan opstellen/maken
+function llmWillDraft(s = "") {
+  return /\b(ik\s+ga|ik\s+zal|we\s+gaan|we\s+zullen)\b[^.?!]*(concept|koopovereenkomst|contract)[^.?!]*(opstellen|maken|genereren|schrijven)/i
+    .test(s || "");
+}
+
 // Laatste assistant-tekst uit de history
 function lastAssistantText(history = []) {
   return [...(history || [])].reverse().find(m => m.role === "assistant")?.content || "";
@@ -145,7 +151,7 @@ function isContractIntentHeuristic(msg=""){
 
 // Affirmatief antwoord van de gebruiker? (heel graag, tuurlijk, natuurlijk, sure, go ahead, etc.)
 function isAffirmative(msg = "") {
-  const s = (msg || "").toLowerCase().normalize("nfkd").trim();
+  const s = (msg || "").toLowerCase().normalize("NFKD").trim();
   if (!s) return false;
   // duidelijke ontkenningen eerst
   if (/\b(nee|niet|liever niet|geen|nog niet|stop|wacht|nope|nah)\b/.test(s)) return false;
@@ -477,8 +483,7 @@ export default async function handler(req, res) {
     }
     const factsBeforeCore = JSON.stringify(coreFactsView(preFacts));
     const factsAfterCore  = JSON.stringify(coreFactsView(facts));
-    const factsChangedCore = factsBeforeCore !== factsAfterCore;
-
+    
     // Render-regels:
     // 1) Alleen bij expliciet verzoek renderen (userWants).
     // 2) Als alle verplichte feiten compleet zijn maar er niet expliciet is gevraagd:
