@@ -91,10 +91,21 @@ function lastAssistantText(history = []) {
   return [...(history || [])].reverse().find(m => m.role === "assistant")?.content || "";
 }
 
-// Herken expliciete toestemmingsvraag in de vorige beurt
-function assistantAskedPermission(history = []) {
-  const txt = lastAssistantText(history);
-  return /\b(zal\s*ik|zullen\s*we)\b[^.?]*(concept|koopovereenkomst|contract)[^.?!]*(maken|opstellen|genereren|schrijven)/i.test(txt);
+// Laatste assistant-tekst uit de history (werkt ook als content een object is)
+function lastAssistantText(history = []) {
+  const msg = [...(history || [])].reverse().find(m => m.role === "assistant");
+  const c = msg?.content;
+  if (!c) return "";
+  if (typeof c === "string") return c;
+  if (Array.isArray(c)) {
+    // OpenAI tool/parts-stijl: neem alle text-velden samen
+    return c.map(p => (typeof p === "string" ? p : (p?.text || ""))).join(" ");
+  }
+  if (typeof c === "object") {
+    // Onze eigen payload van vorige beurt
+    return c.say || c.text || c.message || "";
+  }
+  return String(c || "");
 }
 
 function nearestCourt(place=""){
@@ -538,6 +549,23 @@ export default async function handler(req, res) {
       concept += `\n${extra}`;
     }
 
+    // 🔒 Final consistency guard: als de tekst claimt dat er NU een concept is,
+    // of zojuist toestemming is gegeven, maar 'concept' is nog leeg → render alsnog.
+    const saysHereIsNow =
+      /\b(hier\s+is|onderstaand|bijgaand|hierbij|zie hieronder)\b/i.test(llm.say || "") &&
+      /\b(concept|koopovereenkomst|contract)\b/i.test(llm.say || "");
+
+    if (!concept && (saysHereIsNow || permissionJustGranted)) {
+      const usePH = missing.length > 0;
+      concept = renderConcept(facts, usePH);
+      done = true;
+    // Zorg dat de copy klopt met de werkelijkheid
+    llm.say = usePH
+      ? "Hier is het concept van de koopovereenkomst met invulplekken waar nog gegevens ontbreken."
+      : "Hier is het concept van de koopovereenkomst.";
+    llm.ask = usePH ? `Zullen we dit eerst invullen: ${prettyLabel(missing[0])}?` : null;
+    }
+    
     // Vraag (als die net is gezet) nog inline in 'say' duwen
     normalizeSayAsk(llm);
     return res.status(200).json({
