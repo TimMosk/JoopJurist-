@@ -76,14 +76,24 @@ function set(obj, p, val){ const a=p.split("."); let o=obj; for(let i=0;i<a.leng
 function mergeFacts(oldF={}, newF={}){ const out=JSON.parse(JSON.stringify(oldF)); (function rec(s,pre=""){ for(const k of Object.keys(s||{})){ const v=s[k], path=pre?`${pre}.${k}`:k; if(v&&typeof v==="object"&&!Array.isArray(v)){ if(!get(out,path)) set(out,path,{}); rec(v,path);} else { set(out,path,v);} } })(newF); return out; }
 
 // Herken dat het model in deze beurt claimt dat er nu een concept komt
+// --- Centralised vocabulary for draft detection ---
+const DRAFT_TERMS = "(concept|koopovereenkomst|overeenkomst|koopcontract|contract|contracttekst|document)";
+const DRAFT_TERMS_RE = new RegExp(`\\b${DRAFT_TERMS}\\b`, "i");
+const DRAFT_VERBS_RE = /\b(opstellen|maken|genereren|schrijven)\b/i;
+const HERE_IS_RE     = /\b(hier is|onderstaand|bijgaand|hierbij|onderstaande|zie hieronder)\b/i;
+
+// Model claimt dat het concept nu volgt/eronder staat
 function llmClaimsDraft(s = "") {
-  return /\b(hier is|onderstaand|bijgaand|hierbij|onderstaande|zie hieronder)\b[^.]*\b(concept|koopovereenkomst|contract)\b/i.test(s || "");
+  const t = s || "";
+  return HERE_IS_RE.test(t) && DRAFT_TERMS_RE.test(t);
 }
 
 // Model belooft het concept te gaan opstellen/maken
 function llmWillDraft(s = "") {
-  return /\b(ik\s+ga|ik\s+zal|we\s+gaan|we\s+zullen)\b[^.?!]*(concept|koopovereenkomst|contract)[^.?!]*(opstellen|maken|genereren|schrijven)/i
-    .test(s || "");
+  const t = s || "";
+  return /\b(ik\s+ga|ik\s+zal|we\s+gaan|we\s+zullen)\b/i.test(t) &&
+         DRAFT_TERMS_RE.test(t) &&
+         DRAFT_VERBS_RE.test(t);
 }
 
 // Laatste assistant-tekst uit de history (werkt ook als content een object is)
@@ -141,8 +151,8 @@ const wantsDraft = (msg = "") => {
   const s = (msg || "").toLowerCase().normalize("NFKD");
   if (!s.trim()) return false;
   const verb = /(toon|laat\s*zien|geef|stuur|maak|cre[eë]er|genereer|schrijf|stel\s*op|opstellen|bouw)/i.test(s);
-  const noun = /(concept|conceptversie|voorbeeld(?:\s*contract)?|opzet|koopovereenkomst|contract|clausule)/i.test(s);
-  const polite = /\b(mag ik|kun je|wil je|zou je)\b/i.test(s) && /(concept|voorbeeld|koopovereenkomst|contract)/i.test(s);
+  const noun = DRAFT_TERMS_RE.test(s);
+  const polite = /\b(mag ik|kun je|wil je|zou je)\b/i.test(s) && DRAFT_TERMS_RE.test(s);
   const shortcut = /\bconcept\s*(graag|alvast)?\b/i.test(s); // “concept graag”
   return (verb && noun) || polite || shortcut;
 };
@@ -174,7 +184,17 @@ function isAffirmative(msg = "") {
 
 // Heeft de assistent in de vorige beurt een concept/contract aangeboden?
 function assistantOfferedDraft(history = []) {
-  return /(concept|koopovereenkomst|contract)/i.test(lastAssistantText(history));
+  return DRAFT_TERMS_RE.test(lastAssistantText(history));
+}
+
+// Vroeg de assistent zojuist expliciet om toestemming om te gaan opstellen?
+function assistantAskedPermission(history = []) {
+  const t = (lastAssistantText(history) || "").toLowerCase();
+  if (!t.includes("?")) return false; // moet een vraag zijn
+  // Voorbeelden: "Zal ik het/dit/de overeenkomst opstellen/maken/genereren?"
+  const refersToDraft = DRAFT_TERMS_RE.test(t) || /\b(het|’m|hem|dit|deze)\b/.test(t);
+  const asksPermission = /\b(zal|zullen|kan|kun|mag|wil)\b/.test(t);
+  return refersToDraft && asksPermission && DRAFT_VERBS_RE.test(t);
 }
 
 function detectCategory(facts){
@@ -465,6 +485,7 @@ export default async function handler(req, res) {
     
     const modelClaims = llmClaimsDraft(llm.say);
     const modelWillDraft = llmWillDraft(llm.say);
+    const modelShould = !!llm.should_draft;
     // Bepaal intent + init variabelen (declareer deze SLECHTS ÉÉN keer)
     const intent = isContractIntentHeuristic(message) ? "contract" : "general";
     let concept = null;
@@ -484,8 +505,10 @@ export default async function handler(req, res) {
 
     // Expliciete wens (of bevestiging op aanbod / “ik ga ’m opstellen”-belofte)
     const userWants =
-    wantsDraft(message) ||
-    (isAffirmative(message) && (assistantOfferedDraft(history) || assistantAskedPermission(history) || modelWillDraft));
+      wantsDraft(message) ||
+      modelShould ||
+      (isAffirmative(message) && (assistantOfferedDraft(history) || assistantAskedPermission(history))) ||
+      modelWillDraft || modelClaims;
         
     // Vergelijk enkel kernfeiten (excl. afgeleide velden zoals recht.* en forum.rechtbank)
     
@@ -547,9 +570,8 @@ export default async function handler(req, res) {
     // 🔒 Final consistency guard: als de tekst claimt dat er NU een concept is,
     // of zojuist toestemming is gegeven, maar 'concept' is nog leeg → render alsnog.
     const saysHereIsNow =
-      /\b(hier\s+is|onderstaand|bijgaand|hierbij|zie hieronder)\b/i.test(llm.say || "") &&
-      /\b(concept|koopovereenkomst|contract)\b/i.test(llm.say || "");
-
+      HERE_IS_RE.test(llm.say || "") && DRAFT_TERMS_RE.test(llm.say || "");
+    
     if (!concept && (saysHereIsNow || permissionJustGranted)) {
       const usePH = missing.length > 0;
       concept = renderConcept(facts, usePH);
