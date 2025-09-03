@@ -70,6 +70,11 @@ const CATALOG = [
 ];
 
 // 3) Utils
++// Herken dat het model in deze beurt zegt dat er een concept komt
++function llmClaimsDraft(s = "") {
++  return /\b(hier is|onderstaand|bijgaand)\b[^.]*\b(concept|koopovereenkomst|contract)\b/i.test(s || "");
++}
+
 const PH = "*[●nader aan te vullen●]*";
 const get = (o,p)=>p.split(".").reduce((x,k)=>x&&x[k],o);
 function set(obj, p, val){ const a=p.split("."); let o=obj; for(let i=0;i<a.length-1;i++){ if(!o[a[i]]) o[a[i]]={}; o=o[a[i]]; } o[a[a.length-1]]=val; }
@@ -399,7 +404,8 @@ export default async function handler(req, res) {
     // 7b) LLM-analyse (met preFacts) + normaliseren
     const llm = await callLLM({ facts: preFacts, history, message });
     normalizeSayAsk(llm);
-
+    const modelClaimsDraft = llmClaimsDraft(llm.say);
+    
     // 7c) Facts samenvoegen + vaste rechtsbasis + forum
     let facts = mergeFacts(preFacts, llm.facts || {});
     set(facts, "recht.toepasselijk", "Nederlands recht");
@@ -424,7 +430,12 @@ export default async function handler(req, res) {
     
     // 7f) Intent + concept beslissen (alleen op expliciet verzoek)
     // Concept alléén tonen/aanmaken wanneer de gebruiker dat in dit bericht vraagt.
-    const userWants = wantsDraft(message);
+    const userWants =
+    // expliciet gevraagd in de user-tekst
+    wantsDraft(message)
+    // of: gebruiker zegt "ja/ok/graag" nadat óf de vorige beurt óf deze beurt een aanbod is gedaan
+    || (isAffirmative(message) && (assistantOfferedDraft(history) || modelClaimsDraft));
+    
     // Intent alleen gebruiken voor vraag-sturing/suggesties (niet voor auto-render).
     const intent = isContractIntentHeuristic(message) ? "contract" : "general";
     let concept = null;
@@ -474,6 +485,13 @@ export default async function handler(req, res) {
       llm.ask = null; // algemene chat: geen concept en geen vraag
     }
 
+    // 🔒 Safety: model claimt "Hier is/onderstaand/bijgaand het concept",
+    // maar we sturen géén concept mee → maak er een toestemming-vraag van.
+    if (!concept && modelClaimsDraft) {
+      llm.say = "We hebben alle benodigde gegevens. Zal ik het concept van de koopovereenkomst voor je maken?";
+      llm.ask = null; // vraag zit (na normalize) in 'say'
+    }
+    
     // 7g) Suggesties (alleen in contractmodus en met basisdata)
     const canSuggest = !!get(facts,"object.omschrijving") && get(facts,"prijs.bedrag") != null;
     suggestions = (intent === "contract" && canSuggest) ? pickCatalogSuggestions(facts, message) : [];
