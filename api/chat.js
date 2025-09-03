@@ -459,9 +459,28 @@ export default async function handler(req, res) {
     
     const modelClaims = llmClaimsDraft(llm.say);
     const modelWillDraft = llmWillDraft(llm.say);
+    // Bepaal intent
+    const intent = isContractIntentHeuristic(message) ? "contract" : "general";
+    // Declareer eerst de velden die we mogelijk zo meteen invullen
+    let concept = null;
+    let done = false;
+    
+    // 🔒 HARD GATE: gebruiker bevestigt zójuist op een toestemmingsvraag → meteen renderen
+    const permissionJustGranted = isAffirmative(message) && assistantAskedPermission(history);
+    if (permissionJustGranted) {
+    const usePH = missing.length > 0;
+    concept = renderConcept(facts, usePH);
+    done = true;
+    llm.say = usePH
+    ? "Hier is het concept van de koopovereenkomst met invulplekken waar nog gegevens ontbreken."
+    : "Hier is het concept van de koopovereenkomst.";
+    llm.ask = usePH ? `Zullen we dit eerst invullen: ${prettyLabel(missing[0])}?` : null;
+    }
+
+    // Expliciete wens (of bevestiging op aanbod / “ik ga ’m opstellen”-belofte)
     const userWants =
-      wantsDraft(message) ||
-      (isAffirmative(message) && (assistantOfferedDraft(history) || assistantAskedPermission(history) || modelWillDraft));
+    wantsDraft(message) ||
+    (isAffirmative(message) && (assistantOfferedDraft(history) || assistantAskedPermission(history) || modelWillDraft));
         
     // Intent alleen gebruiken voor vraag-sturing/suggesties (niet voor auto-render).
     const intent = isContractIntentHeuristic(message) ? "contract" : "general";
@@ -488,15 +507,15 @@ export default async function handler(req, res) {
     // 1) Alleen bij expliciet verzoek renderen (userWants).
     // 2) Als alle verplichte feiten compleet zijn maar er niet expliciet is gevraagd:
     //    één keer toestemming vragen om het concept te maken (geen auto-render).
-    if (userWants && missing.length === 0) {
+    if (!concept && userWants && missing.length === 0) {
       concept = renderConcept(facts, false); // volledig
       done = true;
       llm.ask = null;
-    } else if (userWants && missing.length > 0) {
+    } else if (!concept && userWants && missing.length > 0) {
       concept = renderConcept(facts, true);  // placeholders
       done = true;
       llm.ask = `Zullen we dit eerst invullen: ${prettyLabel(missing[0])}?`;
-    } else if (missing.length === 0) {
+    } else if (!concept && missing.length === 0) {
       // Alle kernfeiten zijn binnen, maar geen expliciet verzoek.
       // Vraag 1× toestemming; herhaal niet als we dit net aanboden.
       if (!assistantOfferedDraft(history)) {
@@ -504,7 +523,7 @@ export default async function handler(req, res) {
       } else {
         llm.ask = null;
       }
-    } else if (intent === "contract" && missing.length > 0) {
+    } else if (!concept && intent === "contract" && missing.length > 0) {
       // Nog niet compleet: vraag gericht om de eerstvolgende ontbrekende feit.
       llm.ask = `Zullen we dit eerst invullen: ${prettyLabel(missing[0])}?`;
     } else {
@@ -513,7 +532,7 @@ export default async function handler(req, res) {
 
    // ✅ Failsafe: als gebruiker bevestigt OF het model claimt dat het concept komt,
    // render dan sowieso (met placeholders indien nodig).
-  if (!concept && (userWants || modelClaims || modelWillDraft)) {
+  if (!concept && (modelClaims || modelWillDraft)) {
   const usePH = missing.length > 0;
   concept = renderConcept(facts, usePH);
   done = true;
