@@ -547,11 +547,11 @@ export default async function handler(req, res) {
     // 1) Alleen bij expliciet verzoek renderen (userWants).
     // 2) Als alle verplichte feiten compleet zijn maar er niet expliciet is gevraagd:
     //    één keer toestemming vragen om het concept te maken (geen auto-render).
-    if (!concept && userRenderNow && missing.length === 0) {
+    if (!concept && mustRenderNow && missing.length === 0) {
       concept = renderConcept(facts, false); // volledig
       done = true;
       llm.ask = null;
-    } else if (!concept && userRenderNow && missing.length > 0) {
+    } else if (!concept && mustRenderNow && missing.length > 0) {
       concept = renderConcept(facts, true);  // placeholders
       done = true;
       llm.ask = `Zullen we dit eerst invullen: ${prettyLabel(missing[0])}?`;
