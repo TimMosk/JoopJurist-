@@ -88,11 +88,11 @@ function addAiMarkdown(md){
   const html = window.marked.parse(md);
   const hasContract = md.includes('KOOPOVEREENKOMST') || md.includes('CONTRACT') || md.includes('OVEREENKOMST');
   
-  // Maak een unieke ID voor elke message
-  const messageId = 'msg_' + Date.now();
+  // Gebruik een eenvoudigere unieke ID
+  const messageId = 'msg_' + Math.random().toString(36).substr(2, 9);
   
   const downloadBtn = hasContract ? 
-    `<button id="btn_${messageId}" onclick="downloadFromButton('${messageId}')" style="margin-top: 10px; padding: 8px 16px; background-color: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">📄 Download Word</button>` 
+    `<button id="btn_${messageId}" onclick="downloadFromButton('${messageId}')" style="margin-top: 10px; padding: 8px 16px; background-color: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">📄 Download Tekst</button>` 
     : '';
   
   const messageDiv = `<div class="message ai" id="${messageId}"><div class="bubble formatted-output">⚖️ ${html}${downloadBtn}</div></div>`;
