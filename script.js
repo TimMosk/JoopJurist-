@@ -11,6 +11,8 @@ const t = {
 
 const $ = s => document.querySelector(s);
 async function downloadContract(contractText) {
+  console.log('Starting download...', contractText.substring(0, 50) + '...');
+  
   try {
     const response = await fetch('/api/download-contract', {
       method: 'POST',
@@ -23,11 +25,21 @@ async function downloadContract(contractText) {
       }),
     });
 
+    console.log('Response status:', response.status);
+
     if (!response.ok) {
-      throw new Error('Failed to generate document');
+      const errorText = await response.text();
+      console.error('Server error:', errorText);
+      throw new Error(`Server error: ${response.status}`);
     }
 
     const blob = await response.blob();
+    console.log('Blob size:', blob.size);
+    
+    if (blob.size === 0) {
+      throw new Error('Empty file received');
+    }
+    
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -37,11 +49,14 @@ async function downloadContract(contractText) {
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
     
+    console.log('✅ Download completed');
+    
   } catch (error) {
     console.error('Download failed:', error);
-    alert('Download mislukt. Probeer opnieuw.');
+    alert('Download mislukt: ' + error.message);
   }
 }
+
 const escapeHtml = s => (s||"").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 
 // Sticky autoscroll: blijf onder als gebruiker niet omhoog is gescrolld
