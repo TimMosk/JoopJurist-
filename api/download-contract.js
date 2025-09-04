@@ -1,4 +1,4 @@
-import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel } from "docx";
+const { Document, Packer, Paragraph, TextRun, AlignmentType } = require("docx");
 
 const createSimpleStyles = () => ({
   default: {
@@ -29,15 +29,15 @@ function parseMarkdownToDocx(text) {
   for (const line of lines) {
     if (line.startsWith('**') && line.endsWith('**') && line.length > 4) {
       // Bold headers
-      const text = line.slice(2, -2);
-      if (text.includes('KOOPOVEREENKOMST')) {
+      const textContent = line.slice(2, -2);
+      if (textContent.includes('KOOPOVEREENKOMST')) {
         children.push(new Paragraph({
-          text: text,
+          text: textContent,
           style: "title",
         }));
       } else {
         children.push(new Paragraph({
-          text: text,
+          text: textContent,
           style: "heading",
         }));
       }
@@ -92,18 +92,19 @@ function generateWordDocument(concept) {
   return doc;
 }
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   try {
     if (req.method !== "POST") {
       return res.status(405).json({ error: "Use POST" });
     }
-
-    const { concept, filename = "koopovereenkomst" } = req.body;
+    
+    const { concept, filename = "joopjurist-contract" } = req.body;
     
     if (!concept) {
       return res.status(400).json({ error: "Concept is required" });
     }
-
+    
+    console.log('Generating Word document...');
     const doc = generateWordDocument(concept);
     const buffer = await Packer.toBuffer(doc);
     
@@ -113,6 +114,6 @@ export default async function handler(req, res) {
     
   } catch (error) {
     console.error('Word generation error:', error);
-    res.status(500).json({ error: "Failed to generate document" });
+    res.status(500).json({ error: "Failed to generate document", details: error.message });
   }
-}
+};
