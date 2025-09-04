@@ -67,13 +67,22 @@ function addAiMarkdown(md){
   const html = window.marked.parse(md);
   const hasContract = md.includes('KOOPOVEREENKOMST') || md.includes('CONTRACT') || md.includes('OVEREENKOMST');
   
+  // Maak een unieke ID voor elke message
+  const messageId = 'msg_' + Date.now();
+  
   const downloadBtn = hasContract ? 
-    '<button onclick="downloadContract(`' + md.replace(/`/g, '\\`') + '`)" style="margin-top: 10px; padding: 8px 16px; background-color: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">📄 Download Word</button>' 
+    `<button id="btn_${messageId}" onclick="downloadFromButton('${messageId}')" style="margin-top: 10px; padding: 8px 16px; background-color: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">📄 Download Word</button>` 
     : '';
   
-  $("#chat-log").insertAdjacentHTML("beforeend",
-    `<div class="message ai"><div class="bubble formatted-output">⚖️ ${html}${downloadBtn}</div></div>`
-  );
+  const messageDiv = `<div class="message ai" id="${messageId}"><div class="bubble formatted-output">⚖️ ${html}${downloadBtn}</div></div>`;
+  
+  $("#chat-log").insertAdjacentHTML("beforeend", messageDiv);
+  
+  // Sla de contract tekst op in het DOM element
+  if (hasContract) {
+    document.getElementById(messageId).dataset.contractText = md;
+  }
+  
   scrollToBottom();
 }
 
