@@ -75,25 +75,7 @@ const get = (o,p)=>p.split(".").reduce((x,k)=>x&&x[k],o);
 function set(obj, p, val){ const a=p.split("."); let o=obj; for(let i=0;i<a.length-1;i++){ if(!o[a[i]]) o[a[i]]={}; o=o[a[i]]; } o[a[a.length-1]]=val; }
 function mergeFacts(oldF={}, newF={}){ const out=JSON.parse(JSON.stringify(oldF)); (function rec(s,pre=""){ for(const k of Object.keys(s||{})){ const v=s[k], path=pre?`${pre}.${k}`:k; if(v&&typeof v==="object"&&!Array.isArray(v)){ if(!get(out,path)) set(out,path,{}); rec(v,path);} else { set(out,path,v);} } })(newF); return out; }
 
-// Contract terms regex
-const DRAFT_TERMS_RE = /\b(concept|koopovereenkomst|overeenkomst|koopcontract|contract|contracttekst|document)\b/i;
-const DRAFT_VERBS_RE = /\b(opstel\w*|maak\w*|genereer\w*|schrijf\w*)\b/i;
-
-// Helper functions
-function lastAssistantText(history = []) {
-  const msg = [...(history || [])].reverse().find(m => m.role === "assistant");
-  const c = msg?.content;
-  if (!c) return "";
-  if (typeof c === "string") return c;
-  if (Array.isArray(c)) {
-    return c.map(p => (typeof p === "string" ? p : (p?.text || ""))).join(" ");
-  }
-  if (typeof c === "object") {
-    return c.say || c.text || c.message || "";
-  }
-  return String(c || "");
-}
-
+// Helper functions - simplified to let LLM handle intent detection
 function nearestCourt(place=""){
   const s = (place||"").toLowerCase();
   const map = [
@@ -120,114 +102,7 @@ const REQUIRED = [
 
 const missingKeys = f => REQUIRED.filter(k => !get(f,k));
 
-const prettyLabel = k => ({
-  "koper.naam":"naam van de koper",
-  "verkoper.naam":"naam van de verkoper",
-  "object.omschrijving":"omschrijving van het object",
-  "prijs.bedrag":"koopprijs",
-  "levering.datum":"leveringsdatum",
-  "levering.plaats":"leveringsplaats"
-}[k] || k);
-
-// User intent detection
-const wantsDraft = (msg = "") => {
-  const s = (msg || "").toLowerCase().normalize("NFKD");
-  if (!s.trim()) return false;
-  const verb = /(toon|laat\s*zien|geef|stuur|maak|cre[eë]er|genereer|schrijf|stel\s*op|opstellen|bouw)/i.test(s);
-  const noun = DRAFT_TERMS_RE.test(s);
-  const polite = /\b(mag ik|kun je|wil je|zou je)\b/i.test(s) && DRAFT_TERMS_RE.test(s);
-  const shortcut = /\bconcept\s*(graag|alvast)?\b/i.test(s);
-  return (verb && noun) || polite || shortcut;
-};
-
-const CONTRACT_KW_RE = /(koopovereenkomst|overeenkomst|contract|clausule|bepaling|opstellen|concept|voorbeeld|draft)/i;
-function isContractIntentHeuristic(msg=""){
-  if (wantsDraft(msg)) return true;
-  return CONTRACT_KW_RE.test(msg || "");
-}
-
-function isAffirmative(msg = "") {
-  const s = (msg || "").toLowerCase().normalize("NFKD").trim();
-  if (!s) return false;
-  if (/\b(nee|niet|liever niet|geen|nog niet|stop|wacht|nope|nah)\b/.test(s)) return false;
-  if (/(^|\s)(👍|👌|✅|✔️|☑️|✌️|🙌|👏)(\s|$)/.test(msg)) return true;
-  const yesPhrases = [
-    "ja","jazeker","zeker","tuurlijk","natuurlijk","prima","akkoord",
-    "ok","oke","oké","okay","okey","yes","yup","sure","please","pls",
-    "doe maar","ga maar","ga door","ga je gang","go ahead","is goed",
-    "graag","heel graag","graag hoor","top","helemaal goed","klinkt goed"
-  ];
-  return yesPhrases.some(p =>
-    new RegExp(`\\b${p.replace(/\s+/g,"\\s+")}\\b`, "i").test(s)
-  );
-}
-
-function assistantOfferedDraft(history = []) {
-  const lastText = lastAssistantText(history);
-  return /\b(concept|overeenkomst|contract)\b/i.test(lastText) && 
-         /\b(maken|opstellen|genereren|zal ik)\b/i.test(lastText);
-}
-
-// Category detection and suggestions
-function detectCategory(facts){
-  const s = (facts?.object?.omschrijving || "").toLowerCase();
-  if (/fiets|e-bike|racefiets|mtb|bakfiets|mountainbike/.test(s)) return "fiets";
-  if (/laptop|notebook|macbook|computer|pc/.test(s)) return "laptop";
-  if (/telefoon|smartphone|iphone|samsung/.test(s)) return "telefoon";
-  if (/camera|canon|nikon|sony|fujifilm/.test(s)) return "camera";
-  if (/gitaar|piano|keyboard|viool|drum/.test(s)) return "instrument";
-  return "overig";
-}
-
-function deriveFlags(facts, lastUserMsg=""){
-  const price = Number(facts?.prijs?.bedrag || 0);
-  const shipping = /verzend|bezorg|opsturen|pakket|postnl|dhl/i.test(lastUserMsg)
-                 || /bezorg|aflever/i.test(facts?.levering?.plaats || "");
-  const payInParts = /termijn|in delen|gespreid|betaling in delen/i.test(lastUserMsg);
-  return { price, shipping, payInParts };
-}
-
-function fillTemplate(tpl, facts, vars={}) {
-  return tpl.replace(/\{\{([^}|]+)(?:\|([^}]*))?\}\}/g, (_, path, fb) => {
-    const v = get(facts, path.trim());
-    if (v != null && String(v).trim() !== "") return String(v);
-    if (vars && vars[path.trim()] != null) return String(vars[path.trim()]);
-    return fb != null ? fb : PH;
-  });
-}
-
-function pickCatalogSuggestions(facts, lastUserMsg=""){
-  const cat = detectCategory(facts);
-  const { price, shipping, payInParts } = deriveFlags(facts, lastUserMsg);
-  const matches = CATALOG.filter(it => {
-    const w = it.when || {};
-    if (w.category && !w.category.includes(cat)) return false;
-    if (w.min_price && price < w.min_price) return false;
-    if (w.shipping === true && !shipping) return false;
-    if (w.pay_in_parts === true && !payInParts) return false;
-    return true;
-  });
-  return matches.slice(0,3).map(it => ({
-    id: it.id, title: it.title, why: it.why,
-    clause: fillTemplate(it.clause, facts, it.vars || {})
-  }));
-}
-
-function parseSuggestionSelection(userMsg="", suggestions=[]){
-  const picks = new Set();
-  const m = userMsg.match(/\bneem\b([^.]*)/i);
-  if (m) {
-    const nums = (m[1].match(/\d+/g) || []).map(n => Number(n)-1);
-    nums.forEach(ix => suggestions[ix] && picks.add(suggestions[ix].id));
-  }
-  suggestions.forEach(s => {
-    const kw = (s.id || s.title).split(/\W+/)[0];
-    if (new RegExp(kw,"i").test(userMsg)) picks.add(s.id);
-  });
-  return suggestions.filter(s => picks.has(s.id));
-}
-
-// Data extraction from messages
+// Data extraction from messages - keep basic regex extraction as fallback
 function extractFactsFromMessage(msg = "") {
   const f = {};
   let m = msg.match(/\bkoper\b[^A-Za-z0-9]+(?:is|=|:)?\s*([A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ' -]{1,60})/i);
@@ -245,7 +120,7 @@ function extractFactsFromMessage(msg = "") {
   return f;
 }
 
-// Date and place extraction
+// Date and place extraction - simplified
 const NL_MONTHS = { jan:1,januari:1, feb:2,februari:2, mrt:3,maart:3, apr:4,april:4, mei:5, jun:6,juni:6, jul:7,juli:7, aug:8,augustus:8, sep:9,sept:9,september:9, okt:10,oktober:10, nov:11,november:11, dec:12,december:12 };
 const NL_DOW = { zondag:0, maandag:1, dinsdag:2, woensdag:3, donderdag:4, vrijdag:5, zaterdag:6 };
 
@@ -313,25 +188,95 @@ function extractDatesPlaces(msg, now=new Date()){
   return out;
 }
 
-// LLM System prompt and call
+// Category detection and suggestions - keep for clause suggestions
+function detectCategory(facts){
+  const s = (facts?.object?.omschrijving || "").toLowerCase();
+  if (/fiets|e-bike|racefiets|mtb|bakfiets|mountainbike/.test(s)) return "fiets";
+  if (/laptop|notebook|macbook|computer|pc/.test(s)) return "laptop";
+  if (/telefoon|smartphone|iphone|samsung/.test(s)) return "telefoon";
+  if (/camera|canon|nikon|sony|fujifilm/.test(s)) return "camera";
+  if (/gitaar|piano|keyboard|viool|drum/.test(s)) return "instrument";
+  return "overig";
+}
+
+function deriveFlags(facts, lastUserMsg=""){
+  const price = Number(facts?.prijs?.bedrag || 0);
+  const shipping = /verzend|bezorg|opsturen|pakket|postnl|dhl/i.test(lastUserMsg)
+                 || /bezorg|aflever/i.test(facts?.levering?.plaats || "");
+  const payInParts = /termijn|in delen|gespreid|betaling in delen/i.test(lastUserMsg);
+  return { price, shipping, payInParts };
+}
+
+function fillTemplate(tpl, facts, vars={}) {
+  return tpl.replace(/\{\{([^}|]+)(?:\|([^}]*))?\}\}/g, (_, path, fb) => {
+    const v = get(facts, path.trim());
+    if (v != null && String(v).trim() !== "") return String(v);
+    if (vars && vars[path.trim()] != null) return String(vars[path.trim()]);
+    return fb != null ? fb : PH;
+  });
+}
+
+function pickCatalogSuggestions(facts, lastUserMsg=""){
+  const cat = detectCategory(facts);
+  const { price, shipping, payInParts } = deriveFlags(facts, lastUserMsg);
+  const matches = CATALOG.filter(it => {
+    const w = it.when || {};
+    if (w.category && !w.category.includes(cat)) return false;
+    if (w.min_price && price < w.min_price) return false;
+    if (w.shipping === true && !shipping) return false;
+    if (w.pay_in_parts === true && !payInParts) return false;
+    return true;
+  });
+  return matches.slice(0,3).map(it => ({
+    id: it.id, title: it.title, why: it.why,
+    clause: fillTemplate(it.clause, facts, it.vars || {})
+  }));
+}
+
+function parseSuggestionSelection(userMsg="", suggestions=[]){
+  const picks = new Set();
+  const m = userMsg.match(/\bneem\b([^.]*)/i);
+  if (m) {
+    const nums = (m[1].match(/\d+/g) || []).map(n => Number(n)-1);
+    nums.forEach(ix => suggestions[ix] && picks.add(suggestions[ix].id));
+  }
+  suggestions.forEach(s => {
+    const kw = (s.id || s.title).split(/\W+/)[0];
+    if (new RegExp(kw,"i").test(userMsg)) picks.add(s.id);
+  });
+  return suggestions.filter(s => picks.has(s.id));
+}
+
+// IMPROVED LLM System prompt - let it handle all decision making
 const SYSTEM_PROMPT = `
 Je bent "JoopJurist", een Nederlandse jurist met veel ervaring. Doel: help bij koopovereenkomst voor spullen (roerende zaak) in natuurlijk Nederlands.
 
 STIJL:
-- Eén antwoord per beurt. "say" = korte, vriendelijke boodschap; als er een vraag is, voeg die er direct achteraan toe als "ask" (max 1). Geen dubbele of herhaalde vragen.
-- Geen aparte lijst met "Mogelijke aanvullingen". Adviezen verwerk je natuurlijk in "say" of — als het om contracttekst gaat — rechtstreeks in het "concept".
+- Eén antwoord per beurt. "say" = je boodschap; "ask" = eventuele vraag (max 1). Geen dubbele vragen.
 - Altijd NL; datums liefst ISO (YYYY-MM-DD).
 
 JURIDISCH:
 - Toepasselijk recht = Nederlands recht.
-- Forumkeuze = dichtstbijzijnde rechtbank bij woonplaats van gebruiker (leid af of vraag 1×).
+- Forumkeuze = dichtstbijzijnde rechtbank bij woonplaats van gebruiker.
 
-INTENT:
+BESLISSINGEN:
 - Bepaal "intent" ∈ {"contract","general","other"}.
-- "contract" = gebruiker wil (verder) een koopovereenkomst of clausule opstellen/aanpassen/afronden.
-- "general" = algemene vraag/advies (los van het document).
+- "contract" = gebruiker wil een koopovereenkomst opstellen/aanpassen/afronden.
+- "general" = algemene vraag/advies.
 - "other" = niet te plaatsen/overig.
-- Zet "should_draft" true **alleen** als de gebruiker expliciet om een concept vraagt of duidelijk verder wil met het document; anders false.
+
+WANNEER CONTRACTCONCEPT MAKEN:
+Zet "should_draft" op TRUE als:
+- Gebruiker vraagt expliciet om contract/concept/overeenkomst ("maak een contract", "opstellen graag", "concept maken")
+- Gebruiker zegt ja/akkoord op jouw aanbod om contract te maken
+- Gebruiker geeft laatste ontbrekende info en context suggereert dat ze het contract willen
+- Het logisch is om nu het concept te genereren
+
+Zet "should_draft" op FALSE bij:
+- Algemene vragen over contracten
+- Alleen informatieverzameling
+- Onduidelijke intentie
+- Gebruiker wil nog niet het concept
 
 FACTS-SCHEMA (exact deze paden):
 facts = {
@@ -344,7 +289,7 @@ facts = {
   "recht":   { "toepasselijk": "Nederlands recht" }
 }
 
-OUTPUT (STRICT JSON, zonder extra tekst):
+OUTPUT (STRICT JSON):
 {"say": string, "facts": object, "ask": string|null, "suggestions": [], "concept": null, "done": boolean, "intent":"contract"|"general"|"other", "should_draft": boolean}
 `;
 
@@ -365,31 +310,15 @@ async function callLLM({facts, history, message}) {
   const raw = resp.choices?.[0]?.message?.content || "{}";
   try { return JSON.parse(raw); }
   catch {
-    return { say:"Sorry, ik kon dit niet goed verwerken.", facts, ask:"Wil je het anders formuleren?", suggestions:[], concept:null, done:false };
+    return { say:"Sorry, ik kon dit niet goed verwerken.", facts, ask:"Wil je het anders formuleren?", suggestions:[], concept:null, done:false, should_draft: false };
   }
 }
 
-// Normalize say/ask to avoid duplicate questions
+// Simplified response normalization
 function normalizeSayAsk(llm) {
   if (!llm) return;
 
-  if (llm.say && /\?/.test(llm.say)) {
-    const m = llm.say.match(/([^?.!]*\?)\s*$/);
-    if (m) {
-      const qFull = m[1].trim();
-      const before = llm.say.slice(0, llm.say.length - m[0].length);
-      llm.say = before.replace(/[–—-]\s*$/, "").trim();
-      if (!llm.ask || !llm.ask.trim()) llm.ask = qFull;
-    }
-  }
-
-  if (llm.ask) {
-    const norm = s => (s || "").replace(/\W+/g, "").toLowerCase();
-    if (!llm.ask.trim() || norm(llm.ask) === norm(llm.say)) {
-      llm.ask = null;
-    }
-  }
-  
+  // If ask is set, append to say (but avoid duplication)
   if (llm.ask && llm.ask.trim()) {
     const q = llm.ask.trim().replace(/\s*\?+$/, "?");
     const alreadyHas = (llm.say || "").includes(q);
@@ -401,26 +330,7 @@ function normalizeSayAsk(llm) {
   }
 }
 
-// SIMPLIFIED CONTRACT GENERATION LOGIC
-function shouldGenerateContract(message, facts, history) {
-  // Rule 1: User explicitly asks for contract
-  if (wantsDraft(message)) return { generate: true, reason: 'explicit_request' };
-  
-  // Rule 2: User says yes to our offer
-  if (isAffirmative(message) && assistantOfferedDraft(history)) {
-    return { generate: true, reason: 'accepted_offer' };
-  }
-  
-  // Rule 3: All required data is complete and user shows contract intent
-  const missing = missingKeys(facts);
-  if (missing.length === 0 && isContractIntentHeuristic(message)) {
-    return { generate: true, reason: 'complete_data' };
-  }
-  
-  return { generate: false, reason: 'not_ready' };
-}
-
-// Contract renderer
+// Contract renderer - unchanged
 function renderConcept(f, usePH){
   const v = p => get(f,p) || (usePH ? PH : "");
   const bedrag = get(f,"prijs.bedrag");
@@ -467,7 +377,7 @@ Handtekening: _________________________________
 Datum: __________________`;
 }
 
-// Main API handler
+// MAIN API HANDLER - Simplified to trust LLM decisions
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") return res.status(405).json({ error: "Use POST" });
@@ -493,7 +403,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // Extract facts from message using regex patterns
+    // Extract basic facts as fallback (LLM should handle most of this)
     const extracted = extractFactsFromMessage(message);
     const extractedDP = extractDatesPlaces(message, NOW);
     const mappedDP = {};
@@ -502,7 +412,7 @@ export default async function handler(req, res) {
     if (extractedDP["forum.woonplaats_gebruiker"]) set(mappedDP, "forum.woonplaats_gebruiker", extractedDP["forum.woonplaats_gebruiker"]);
     const preFacts = mergeFacts(mergeFacts(clientFacts, extracted), mappedDP);
 
-    // Get LLM response
+    // Get LLM response - this is where all the intelligence happens
     const llm = await callLLM({ facts: preFacts, history, message });
     normalizeSayAsk(llm);
 
@@ -510,74 +420,53 @@ export default async function handler(req, res) {
     let facts = mergeFacts(preFacts, llm.facts || {});
     set(facts, "recht.toepasselijk", "Nederlands recht");
 
-    // Extra fallback for missing names
-    if (!get(facts, "koper.naam")) {
-      const f2 = extractFactsFromMessage(message);
-      if (f2?.koper?.naam) set(facts, "koper.naam", f2.koper.naam);
-    }
-    if (!get(facts, "verkoper.naam")) {
-      const f2 = extractFactsFromMessage(message);
-      if (f2?.verkoper?.naam) set(facts, "verkoper.naam", f2.verkoper.naam);
-    }
-
-    // Set court based on user location
+    // Set court based on user location if we have it
     if (get(facts, "forum.woonplaats_gebruiker") && !get(facts, "forum.rechtbank")) {
       set(facts, "forum.rechtbank", nearestCourt(get(facts, "forum.woonplaats_gebruiker")));
     }
 
-    // SIMPLIFIED CONTRACT GENERATION LOGIC
-    const contractDecision = shouldGenerateContract(message, facts, history);
+    // SIMPLIFIED: Trust the LLM's should_draft decision completely
     const missing = missingKeys(facts);
-    const intent = isContractIntentHeuristic(message) ? "contract" : "general";
-    
     let concept = null;
     let done = false;
     let suggestions = [];
 
-    if (contractDecision.generate) {
-      // Generate contract (with or without placeholders)
+    // Generate contract if LLM says so
+    if (llm.should_draft) {
       const usePlaceholders = missing.length > 0;
       concept = renderConcept(facts, usePlaceholders);
       done = !usePlaceholders; // only "done" if no missing data
       
-      // Set appropriate response message
-      if (contractDecision.reason === 'complete_data') {
-        llm.say = "Perfect! Ik heb alle benodigde gegevens. Hier is het concept van de koopovereenkomst.";
-      } else if (usePlaceholders) {
-        llm.say = "Hier is het concept van de koopovereenkomst met invulplekken waar nog gegevens ontbreken.";
-      } else {
-        llm.say = "Hier is het concept van de koopovereenkomst.";
+      // Handle suggestions for additional clauses
+      const canSuggest = !!get(facts, "object.omschrijving") && get(facts, "prijs.bedrag") != null;
+      if (canSuggest) {
+        suggestions = pickCatalogSuggestions(facts, message);
+        
+        // Handle suggestion selections
+        const picked = parseSuggestionSelection(message, suggestions);
+        if (picked.length && concept) {
+          const extra = picked.map(s => `\n**Aanvullende bepaling – ${s.title}**\n${s.clause}\n`).join("");
+          concept += `\n${extra}`;
+        }
       }
-      
-      // Clear any ask if we're generating
-      llm.ask = null;
-      
     } else {
-      // Don't generate contract
-      if (missing.length === 0 && intent === "contract" && !assistantOfferedDraft(history)) {
-        // We have all data but user hasn't asked - offer to generate
-        llm.say = "Geweldig! Ik heb alle benodigde gegevens voor de koopovereenkomst.";
-        llm.ask = "Zal ik het concept nu voor je maken?";
-      } else if (missing.length > 0 && intent === "contract") {
-        // Missing data - ask for next piece
-        llm.ask = `Om verder te gaan heb ik nog nodig: ${prettyLabel(missing[0])}. Kun je die verstrekken?`;
+      // Not generating contract - might still show suggestions for future use
+      const canSuggest = !!get(facts, "object.omschrijving") && get(facts, "prijs.bedrag") != null;
+      if (canSuggest && llm.intent === "contract") {
+        suggestions = pickCatalogSuggestions(facts, message);
       }
-      // For general chat, just use the LLM's response as-is
     }
 
-    // Handle suggestions
-    const canSuggest = !!get(facts, "object.omschrijving") && get(facts, "prijs.bedrag") != null;
-    suggestions = (intent === "contract" && canSuggest) ? pickCatalogSuggestions(facts, message) : [];
-
-    // Handle suggestion selections
-    const picked = parseSuggestionSelection(message, suggestions);
-    if (picked.length && concept) {
-      const extra = picked.map(s => `\n**Aanvullende bepaling – ${s.title}**\n${s.clause}\n`).join("");
-      concept += `\n${extra}`;
+    // Debug logging (remove in production)
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Decision factors:', {
+        message: message.slice(0, 50) + '...',
+        llm_should_draft: llm.should_draft,
+        missing_count: missing.length,
+        intent: llm.intent,
+        generating_concept: !!concept
+      });
     }
-
-    // Final response normalization
-    normalizeSayAsk(llm);
 
     return res.status(200).json({
       say: llm.say || "Helder.",
