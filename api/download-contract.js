@@ -1,4 +1,5 @@
-module.exports = async function handler(req, res) {
+// Simple test API using ES modules
+export default async function handler(req, res) {
   try {
     console.log('API called with method:', req.method);
     
@@ -13,16 +14,16 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: "Concept is required" });
     }
     
-    // Maak simpele tekst bestand (tijdelijk, om te testen)
+    // Maak simpele tekst bestand
     const textContent = `JoopJurist - Nederlandse Juridische Contracten
-    
+
 ${concept}
 
 Dit document is gegenereerd door JoopJurist.nl`;
     
     console.log('Sending text file...');
     
-    res.setHeader('Content-Type', 'text/plain');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}.txt"`);
     res.send(textContent);
     
@@ -33,4 +34,4 @@ Dit document is gegenereerd door JoopJurist.nl`;
       details: error.message 
     });
   }
-};
+}
