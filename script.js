@@ -10,6 +10,12 @@ const t = {
 };
 
 const $ = s => document.querySelector(s);
+function downloadFromButton(messageId) {
+  const messageEl = document.getElementById(messageId);
+  const contractText = messageEl.dataset.contractText;
+  downloadContract(contractText);
+}
+
 async function downloadContract(contractText) {
   console.log('Starting download...', contractText.substring(0, 50) + '...');
   
