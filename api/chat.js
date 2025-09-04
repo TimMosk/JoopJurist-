@@ -474,7 +474,8 @@ export default async function handler(req, res) {
       ask: llm.ask || null,
       suggestions,
       concept,
-      done
+      done,
+      downloadUrl: concept ? '/api/download-contract' : null  
     });
 
   } catch (err) {
