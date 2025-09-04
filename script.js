@@ -10,6 +10,38 @@ const t = {
 };
 
 const $ = s => document.querySelector(s);
+async function downloadContract(contractText) {
+  try {
+    const response = await fetch('/api/download-contract', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        concept: contractText,
+        filename: 'joopjurist-contract'
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to generate document');
+    }
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'joopjurist-contract.docx';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+    
+  } catch (error) {
+    console.error('Download failed:', error);
+    alert('Download mislukt. Probeer opnieuw.');
+  }
+}
 const escapeHtml = s => (s||"").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 
 // Sticky autoscroll: blijf onder als gebruiker niet omhoog is gescrolld
@@ -30,13 +62,21 @@ function addUser(text){
    $("#chat-log").insertAdjacentHTML("beforeend", html);
    scrollToBottom();
 }
+
 function addAiMarkdown(md){
   const html = window.marked.parse(md);
+  const hasContract = md.includes('KOOPOVEREENKOMST') || md.includes('CONTRACT') || md.includes('OVEREENKOMST');
+  
+  const downloadBtn = hasContract ? 
+    '<button onclick="downloadContract(`' + md.replace(/`/g, '\\`') + '`)" style="margin-top: 10px; padding: 8px 16px; background-color: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">📄 Download Word</button>' 
+    : '';
+  
   $("#chat-log").insertAdjacentHTML("beforeend",
-    `<div class="message ai"><div class="bubble formatted-output">⚖️ ${html}</div></div>`
+    `<div class="message ai"><div class="bubble formatted-output">⚖️ ${html}${downloadBtn}</div></div>`
   );
   scrollToBottom();
 }
+
 function addTyping(){
   const el = document.createElement("div");
   el.className = "message ai"; el.id = "typing-indicator";
