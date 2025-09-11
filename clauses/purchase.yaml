@@ -1,1 +1,78 @@
+- id: "eigendom_diefstal"
+  title: "Eigendom & geen diefstal"
+  why: "Voorkomt problemen als het object gestolen blijkt."
+  clause: |
+    Verkoper verklaart eigenaar te zijn en dat het object niet als gestolen geregistreerd staat.
+    Bij onjuistheid mag koper de overeenkomst ontbinden en ontvangt hij de koopprijs terug.
+  when:
+    category: ["fiets", "telefoon", "laptop", "camera", "instrument", "overig"]
+    min_price: 200
 
+- id: "identificatie_fiets"
+  title: "Framenummer & sleutels (fiets)"
+  why: "Maakt de fiets identificeerbaar en afspraken over sleutels duidelijk."
+  clause: |
+    Identificatie: framenummer {{object.identifiers|*[●nader aan te vullen●]*}}.
+    Verkoper levert bij levering {{keys_count|2}} sleutels over.
+  when:
+    category: ["fiets"]
+  vars:
+    keys_count: 2
+
+- id: "proefrit_gebreken"
+  title: "Proefrit/inspectie & verborgen gebreken"
+  why: "Legt de staat vast en beperkt discussies achteraf."
+  clause: |
+    Koper heeft het object kunnen inspecteren/proefrijden op {{inspectiedatum|*[●nader aan te vullen●]*}}
+    en accepteert de zichtbare staat. Verborgen gebreken die verkoper kende blijven voor rekening van verkoper.
+  when:
+    category: ["fiets", "laptop", "telefoon", "camera", "instrument", "overig"]
+
+- id: "accountvrij_imei"
+  title: "Accountvrij & IMEI (telefoon)"
+  why: "Voorkomt lock-problemen en controleert herkomst."
+  clause: |
+    Verkoper garandeert dat het toestel niet iCloud/Google-gelockt is en dat de IMEI
+    {{object.identifiers|*[●nader aan te vullen●]*}} niet als gestolen geregistreerd staat.
+  when:
+    category: ["telefoon"]
+
+- id: "licentie_privacy"
+  title: "Licentie & dataveilig wissen (laptop)"
+  why: "Regelt legitieme software en privacybescherming."
+  clause: |
+    Meegeleverd: geldige licentie {{software_licentie|*[●nader aan te vullen●]*}}.
+    Verkoper verwijdert alle persoonlijke data en accounts vóór levering (factory reset).
+  when:
+    category: ["laptop"]
+
+- id: "transport_risico"
+  title: "Transport & risico bij verzending"
+  why: "Legt vast wie het risico draagt tijdens verzending."
+  clause: |
+    Bij verzending gaat het risico op verlies of beschadiging over bij aflevering op het bezorgadres.
+    Partijen spreken af dat {{verzendkosten_betaler|koper}} de verzendkosten en eventuele verzekering betaalt.
+  when:
+    shipping: true
+
+- id: "eigendomsvoorbehoud"
+  title: "Eigendom pas na volledige betaling"
+  why: "Geeft zekerheid aan de verkoper bij betaling in termijnen."
+  clause: |
+    Eigendom gaat pas over na volledige betaling van de koopprijs; tot dat moment mag koper het object niet verkopen of bezwaren.
+  when:
+    pay_in_parts: true
+
+- id: "garantie_hoog_risico"
+  title: "Uitgebreide garantie (hoog risico)"
+  why: "Biedt maximale bescherming voor dure of complexe transacties."
+  clause: |
+    Verkoper garandeert dat het object vrij is van gebreken en voldoet aan de volgende specificaties:
+    {{specificaties|*[te specificeren]*}}.
+    Deze garantie geldt voor een periode van 24 maanden na levering.
+    Bij niet-nakoming is verkoper aansprakelijk voor reparatie of vervanging.
+  when:
+    category: ["laptop", "machine", "voertuig"]
+    min_price: 5000
+  vars:
+    specificaties: "*[te specificeren]*"
