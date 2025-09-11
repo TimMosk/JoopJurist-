@@ -6,19 +6,74 @@ export const config = { runtime: "nodejs" };
 
 // 1) Imports + OpenAI client
 import OpenAI from "openai";
-import { readFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-import yaml from 'js-yaml';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Load clauses from YAML file
-const clausesPath = join(__dirname, '../clauses/purchase.yaml');
-const clausesFile = readFileSync(clausesPath, 'utf8');
-const CATALOG = yaml.load(clausesFile);
+// Fetch clauses from GitHub
+async function loadCatalog(agreementType = "purchase") {
+  const url = `https://raw.githubusercontent.com/your-username/joopjurist/main/clauses/${agreementType}.yaml`;
+  const response = await fetch(url);
+  const yamlText = await response.text();
+  // Simple YAML parser (for basic key/value pairs)
+  const lines = yamlText.split('\n');
+  const catalog = [];
+  let currentClause = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line.startsWith('- id:')) {
+      if (currentClause) catalog.push(currentClause);
+      currentClause = { id: line.split(':')[1].trim() };
+    } else if (line.startsWith('title:')) {
+      currentClause.title = line.split(':')[1].trim();
+    } else if (line.startsWith('why:')) {
+      currentClause.why = line.split(':')[1].trim();
+    } else if (line.startsWith('clause:')) {
+      let clauseLines = [];
+      i++;
+      while (i < lines.length && lines[i].trim().startsWith('|')) {
+        clauseLines.push(lines[i].trim().replace(/^\|/, '').trim());
+        i++;
+      }
+      i--; // Adjust for loop increment
+      currentClause.clause = clauseLines.join('\n');
+    } else if (line.startsWith('when:')) {
+      currentClause.when = {};
+      // Parse categories
+      const categoryLine = lines.find(l => l.includes('category:'));
+      if (categoryLine) {
+        const categories = categoryLine.match(/\[(.*?)\]/)[1].split(',').map(c => c.trim().replace(/"/g, ''));
+        currentClause.when.category = categories;
+      }
+      // Parse min_price
+      const priceLine = lines.find(l => l.includes('min_price:'));
+      if (priceLine) {
+        currentClause.when.min_price = parseInt(priceLine.split(':')[1].trim());
+      }
+      // Parse shipping/pay_in_parts
+      const shippingLine = lines.find(l => l.includes('shipping:'));
+      if (shippingLine) {
+        currentClause.when.shipping = shippingLine.includes('true');
+      }
+      const payInPartsLine = lines.find(l => l.includes('pay_in_parts:'));
+      if (payInPartsLine) {
+        currentClause.when.pay_in_parts = payInPartsLine.includes('true');
+      }
+    } else if (line.startsWith('vars:')) {
+      currentClause.vars = {};
+      const varsLine = lines.find(l => l.includes('keys_count:') || l.includes('specificaties:'));
+      if (varsLine) {
+        const key = varsLine.split(':')[0].trim();
+        const value = varsLine.split(':')[1].trim();
+        currentClause.vars[key] = isNaN(value) ? value : parseInt(value);
+      }
+    }
+  }
+  if (currentClause) catalog.push(currentClause);
+  return catalog;
+}
+
+// Load the catalog when the module initializes
+const CATALOG = await loadCatalog();
 
 // 3) Utils
 const PH = "*[●nader aan te vullen●]*";
