@@ -1,1 +1,18 @@
+- id: "geheimhouding_standaard"
+  title: "Standaard geheimhoudingsplicht"
+  why: "Beschermt vertrouwelijke informatie die tijdens de duur van de overeenkomst wordt gedeeld."
+  clause: |
+    Partijen zullen alle vertrouwelijke informatie die zij van elkaar ontvangen strikt geheim houden
+    en alleen gebruiken voor het doel van deze overeenkomst. Deze verplichting geldt voor een
+    periode van 3 jaar na beëindiging van de overeenkomst.
+  when:
+    agreement_type: ["nda"]
 
+- id: "boete_vertrouwelijkheid"
+  title: "Boetebeding bij schending geheimhouding"
+  why: "Voegt een financiële consequentie toe aan schending van de geheimhouding."
+  clause: |
+    Bij schending van de geheimhoudingsplicht is de schendende partij een direct opeisbare boete
+    verschuldigd van €10.000 per schending, zonder dat bewijs van schade nodig is.
+  when:
+    agreement_type: ["nda"]
