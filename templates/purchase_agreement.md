@@ -1,4 +1,5 @@
 **KOOPOVEREENKOMST – Roerende Zaken**
+
 **Partijen:**
 1. **Koper**: {{koper.naam}}{{#koper.adres}}, {{koper.adres}}{{/koper.adres}}; en
 2. **Verkoper**: {{verkoper.naam}}{{#verkoper.adres}}, {{verkoper.adres}}{{/verkoper.adres}}.
@@ -28,6 +29,7 @@ Geschillen worden exclusief voorgelegd aan de **{{#forum.rechtbank}}{{forum.rech
 **Koper**: {{#koper.naam}}{{koper.naam}}{{else}}Koper{{/koper.naam}}
 Handtekening: _________________________________
 Datum: __________________
+
 **Verkoper**: {{#verkoper.naam}}{{verkoper.naam}}{{else}}Verkoper{{/verkoper.naam}}
 Handtekening: _________________________________
 Datum: __________________
