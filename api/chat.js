@@ -477,10 +477,10 @@ _Toepasselijk recht: Nederlands recht. Forum: {{forum.rechtbank|${PH}}}._`;
 
 // Updated renderConcept to use fetched templates
 async function renderConcept(f, usePH) {
-  const agreementType = f.agreement_type || "purchase_agreement";
+  const agreementType = f.agreement_type || "purchase";
   const template = await fetchTemplate(agreementType);
   return fillTemplate(template, f, { PH: "*[●nader aan te vullen●]*" });
-} // <-- MISSING BRACE WAS HERE
+} HERE
 
 // MAIN API HANDLER - Simplified to trust LLM decisions
 export default async function handler(req, res) {
