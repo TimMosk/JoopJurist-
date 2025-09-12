@@ -24,6 +24,7 @@ Op deze overeenkomst is **Nederlands recht** van toepassing.
 Geschillen worden exclusief voorgelegd aan de **{{#forum.rechtbank}}{{forum.rechtbank}}{{else}}dichtstbijzijnde rechtbank bij woonplaats koper{{/forum.rechtbank}}**.
 
 **Deze overeenkomst is ondertekend door:**
+
 **Koper**: {{#koper.naam}}{{koper.naam}}{{else}}Koper{{/koper.naam}}
 Handtekening: _________________________________
 Datum: __________________
