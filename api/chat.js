@@ -222,10 +222,13 @@ function fillTemplate(tpl, facts, vars={}) {
   });
 }
 
-function pickCatalogSuggestions(facts, lastUserMsg=""){
+// Updated to fetch clauses dynamically
+async function pickCatalogSuggestions(facts, lastUserMsg="") {
+  const agreementType = facts.agreement_type || "purchase";
+  const catalog = await loadCatalog(agreementType);
   const cat = detectCategory(facts);
   const { price, shipping, payInParts } = deriveFlags(facts, lastUserMsg);
-  const matches = CATALOG.filter(it => {
+  const matches = catalog.filter(it => {
     const w = it.when || {};
     if (w.category && !w.category.includes(cat)) return false;
     if (w.min_price && price < w.min_price) return false;
@@ -233,8 +236,10 @@ function pickCatalogSuggestions(facts, lastUserMsg=""){
     if (w.pay_in_parts === true && !payInParts) return false;
     return true;
   });
-  return matches.slice(0,3).map(it => ({
-    id: it.id, title: it.title, why: it.why,
+  return matches.slice(0, 3).map(it => ({
+    id: it.id,
+    title: it.title,
+    why: it.why,
     clause: fillTemplate(it.clause, facts, it.vars || {})
   }));
 }
@@ -336,52 +341,18 @@ function normalizeSayAsk(llm) {
   }
 }
 
-// Contract renderer - unchanged
-function renderConcept(f, usePH){
-  const v = p => get(f,p) || (usePH ? PH : "");
-  const bedrag = get(f,"prijs.bedrag");
-  const prijsStr = (bedrag != null && String(bedrag).trim() !== "")
-    ? `€ ${Number(bedrag).toLocaleString("nl-NL",{minimumFractionDigits:2, maximumFractionDigits:2})}`
-    : (usePH ? PH : "€ …");
-  const forum = get(f,"forum.rechtbank") || (usePH ? PH : "dichtstbijzijnde rechtbank bij woonplaats koper");
-
-  return `**KOOPOVEREENKOMST – SPULLEN (roerende zaak)**
-
-**Partijen**
-1. **Koper**: ${v("koper.naam")}${get(f,"koper.adres")?`, ${get(f,"koper.adres")}`:""}.
-2. **Verkoper**: ${v("verkoper.naam")}${get(f,"verkoper.adres")?`, ${get(f,"verkoper.adres")}`:""}.
-
-**1. Omschrijving van het object**
-Het verkochte betreft: **${v("object.omschrijving")}**${get(f,"object.conditie")?`, conditie: ${get(f,"object.conditie")}`:""}${get(f,"object.identifiers")?` (identificatie: ${get(f,"object.identifiers")})`:""}.
-
-**2. Prijs en betaling**
-De koopprijs bedraagt **${prijsStr}**. Betaling via ${get(f,"betaling.wijze")||"overboeking"} op ${get(f,"betaling.moment")||"moment van levering"}.
-
-**3. Levering en risico**
-Levering vindt plaats op **${v("levering.datum")}** te **${v("levering.plaats")}**. Het risico gaat over bij levering.
-
-**4. Eigendom en garanties**
-Verkoper verklaart eigenaar te zijn en dat het object vrij is van beslagen en beperkte rechten. Verborgen gebreken die verkoper kende blijven voor rekening van verkoper.
-
-**5. Toepasselijk recht en forumkeuze**
-Op deze overeenkomst is **Nederlands recht** van toepassing.
-Geschillen worden exclusief voorgelegd aan de **${forum}**.
-
-
-**Ondertekening**
-
-**Koper**: ${get(f,"koper.naam")||"Koper"}
-
-Handtekening: _________________________________
-
-Datum: __________________
-
-**Verkoper**: ${get(f,"verkoper.naam")||"Verkoper"}
-
-Handtekening: _________________________________
-
-Datum: __________________`;
+// Fetch template from GitHub
+async function fetchTemplate(agreementType) {
+  const url = `https://raw.githubusercontent.com/your-username/joopjurist/main/templates/${agreementType}.md`;
+  const response = await fetch(url);
+  return await response.text();
 }
+
+// Updated renderConcept to use fetched templates
+async function renderConcept(f, usePH) {
+  const agreementType = f.agreement_type || "purchase_agreement";
+  const template = await fetchTemplate(agreementType);
+  return fillTemplate(template, f, { PH: "*[●nader aan te vullen●]*" });
 
 // MAIN API HANDLER - Simplified to trust LLM decisions
 export default async function handler(req, res) {
@@ -422,6 +393,12 @@ export default async function handler(req, res) {
     const llm = await callLLM({ facts: preFacts, history, message });
     normalizeSayAsk(llm);
 
+    // NEW: Load suggestions asynchronously
+    const canSuggest = !!get(facts, "object.omschrijving") && get(facts, "prijs.bedrag") != null;
+    if (canSuggest && llm.intent === "contract") {
+    suggestions = await pickCatalogSuggestions(facts, message);
+    }
+    
     // Merge all facts
     let facts = mergeFacts(preFacts, llm.facts || {});
     set(facts, "recht.toepasselijk", "Nederlands recht");
