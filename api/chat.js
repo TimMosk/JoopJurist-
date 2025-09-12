@@ -72,9 +72,6 @@ async function loadCatalog(agreementType = "purchase") {
   return catalog;
 }
 
-// Load the catalog when the module initializes
-const CATALOG = await loadCatalog();
-
 // 3) Utils
 const PH = "*[●nader aan te vullen●]*";
 const get = (o,p)=>p.split(".").reduce((x,k)=>x&&x[k],o);
@@ -412,18 +409,17 @@ export default async function handler(req, res) {
     const missing = missingKeys(facts);
     let concept = null;
     let done = false;
-    let suggestions = [];
 
     // Generate contract if LLM says so
     if (llm.should_draft) {
       const usePlaceholders = missing.length > 0;
-      concept = renderConcept(facts, usePlaceholders);
+      concept = await renderConcept(facts, usePlaceholders);
       done = !usePlaceholders; // only "done" if no missing data
       
       // Handle suggestions for additional clauses
       const canSuggest = !!get(facts, "object.omschrijving") && get(facts, "prijs.bedrag") != null;
       if (canSuggest) {
-        suggestions = pickCatalogSuggestions(facts, message);
+        suggestions = await pickCatalogSuggestions(facts, message);
         
         // Handle suggestion selections
         const picked = parseSuggestionSelection(message, suggestions);
@@ -436,7 +432,7 @@ export default async function handler(req, res) {
       // Not generating contract - might still show suggestions for future use
       const canSuggest = !!get(facts, "object.omschrijving") && get(facts, "prijs.bedrag") != null;
       if (canSuggest && llm.intent === "contract") {
-        suggestions = pickCatalogSuggestions(facts, message);
+        suggestions = await pickCatalogSuggestions(facts, message);
       }
     }
 
