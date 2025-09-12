@@ -1,5 +1,4 @@
 // /api/chat.js — JoopJurist backend (Vercel/Node serverless)
-// Vereist: OPENAI_API_KEY in je environment (Vercel dashboard of lokaal .env)
 
 // 0) Runtime MOET bovenaan
 export const config = { runtime: "nodejs" };
@@ -8,79 +7,110 @@ export const config = { runtime: "nodejs" };
 import OpenAI from "openai";
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Fetch clauses from GitHub
+// Fetch clauses from GitHub (robust)
 async function loadCatalog(agreementType = "purchase") {
   const url = `https://raw.githubusercontent.com/your-username/joopjurist/main/clauses/${agreementType}.yaml`;
-  const response = await fetch(url);
-  const yamlText = await response.text();
-  // Simple YAML parser (for basic key/value pairs)
-  const lines = yamlText.split('\n');
-  const catalog = [];
-  let currentClause = null;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return []; // fail soft
+    const yamlText = await response.text();
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (line.startsWith('- id:')) {
-      if (currentClause) catalog.push(currentClause);
-      currentClause = { id: line.split(':')[1].trim() };
-    } else if (line.startsWith('title:')) {
-      currentClause.title = line.split(':')[1].trim();
-    } else if (line.startsWith('why:')) {
-      currentClause.why = line.split(':')[1].trim();
-    } else if (line.startsWith('clause:')) {
-      let clauseLines = [];
-      i++;
-      while (i < lines.length && lines[i].trim().startsWith('|')) {
-        clauseLines.push(lines[i].trim().replace(/^\|/, '').trim());
+    // Simple YAML parser (very shallow)
+    const lines = yamlText.split("\n");
+    const catalog = [];
+    let currentClause = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.startsWith("- id:")) {
+        if (currentClause) catalog.push(currentClause);
+        currentClause = { id: line.split(":")[1].trim() };
+      } else if (line.startsWith("title:")) {
+        currentClause.title = line.split(":")[1].trim();
+      } else if (line.startsWith("why:")) {
+        currentClause.why = line.split(":")[1].trim();
+      } else if (line.startsWith("clause:")) {
+        let clauseLines = [];
         i++;
-      }
-      i--; // Adjust for loop increment
-      currentClause.clause = clauseLines.join('\n');
-    } else if (line.startsWith('when:')) {
-      currentClause.when = {};
-      // Parse categories
-      const categoryLine = lines.find(l => l.includes('category:'));
-      if (categoryLine) {
-        const categories = categoryLine.match(/\[(.*?)\]/)[1].split(',').map(c => c.trim().replace(/"/g, ''));
-        currentClause.when.category = categories;
-      }
-      // Parse min_price
-      const priceLine = lines.find(l => l.includes('min_price:'));
-      if (priceLine) {
-        currentClause.when.min_price = parseInt(priceLine.split(':')[1].trim());
-      }
-      // Parse shipping/pay_in_parts
-      const shippingLine = lines.find(l => l.includes('shipping:'));
-      if (shippingLine) {
-        currentClause.when.shipping = shippingLine.includes('true');
-      }
-      const payInPartsLine = lines.find(l => l.includes('pay_in_parts:'));
-      if (payInPartsLine) {
-        currentClause.when.pay_in_parts = payInPartsLine.includes('true');
-      }
-    } else if (line.startsWith('vars:')) {
-      currentClause.vars = {};
-      const varsLine = lines.find(l => l.includes('keys_count:') || l.includes('specificaties:'));
-      if (varsLine) {
-        const key = varsLine.split(':')[0].trim();
-        const value = varsLine.split(':')[1].trim();
-        currentClause.vars[key] = isNaN(value) ? value : parseInt(value);
+        while (i < lines.length && lines[i].trim().startsWith("|")) {
+          clauseLines.push(lines[i].trim().replace(/^\|/, "").trim());
+          i++;
+        }
+        i--; // Adjust for loop increment
+        currentClause.clause = clauseLines.join("\n");
+      } else if (line.startsWith("when:")) {
+        currentClause.when = {};
+        const categoryLine = lines.find((l) => l.includes("category:"));
+        if (categoryLine) {
+          const m = categoryLine.match(/\[(.*?)\]/);
+          if (m) {
+            const categories = m[1]
+              .split(",")
+              .map((c) => c.trim().replace(/"/g, ""));
+            currentClause.when.category = categories;
+          }
+        }
+        const priceLine = lines.find((l) => l.includes("min_price:"));
+        if (priceLine) {
+          const n = parseInt(priceLine.split(":")[1].trim(), 10);
+          if (!Number.isNaN(n)) currentClause.when.min_price = n;
+        }
+        const shippingLine = lines.find((l) => l.includes("shipping:"));
+        if (shippingLine) currentClause.when.shipping = /true/i.test(shippingLine);
+        const payInPartsLine = lines.find((l) => l.includes("pay_in_parts:"));
+        if (payInPartsLine)
+          currentClause.when.pay_in_parts = /true/i.test(payInPartsLine);
+      } else if (line.startsWith("vars:")) {
+        currentClause.vars = {};
+        const varsLine = lines.find(
+          (l) => l.includes("keys_count:") || l.includes("specificaties:")
+        );
+        if (varsLine) {
+          const key = varsLine.split(":")[0].trim();
+          const value = varsLine.split(":")[1].trim();
+          currentClause.vars[key] = isNaN(value) ? value : parseInt(value, 10);
+        }
       }
     }
+    if (currentClause) catalog.push(currentClause);
+    return catalog;
+  } catch {
+    return []; // fail soft
   }
-  if (currentClause) catalog.push(currentClause);
-  return catalog;
 }
 
 // 3) Utils
 const PH = "*[●nader aan te vullen●]*";
-const get = (o,p)=>p.split(".").reduce((x,k)=>x&&x[k],o);
-function set(obj, p, val){ const a=p.split("."); let o=obj; for(let i=0;i<a.length-1;i++){ if(!o[a[i]]) o[a[i]]={}; o=o[a[i]]; } o[a[a.length-1]]=val; }
-function mergeFacts(oldF={}, newF={}){ const out=JSON.parse(JSON.stringify(oldF)); (function rec(s,pre=""){ for(const k of Object.keys(s||{})){ const v=s[k], path=pre?`${pre}.${k}`:k; if(v&&typeof v==="object"&&!Array.isArray(v)){ if(!get(out,path)) set(out,path,{}); rec(v,path);} else { set(out,path,v);} } })(newF); return out; }
+const get = (o, p) => p.split(".").reduce((x, k) => (x && x[k] !== undefined ? x[k] : undefined), o);
+function set(obj, p, val) {
+  const a = p.split(".");
+  let o = obj;
+  for (let i = 0; i < a.length - 1; i++) {
+    if (!o[a[i]]) o[a[i]] = {};
+    o = o[a[i]];
+  }
+  o[a[a.length - 1]] = val;
+}
+function mergeFacts(oldF = {}, newF = {}) {
+  const out = JSON.parse(JSON.stringify(oldF));
+  (function rec(s, pre = "") {
+    for (const k of Object.keys(s || {})) {
+      const v = s[k],
+        path = pre ? `${pre}.${k}` : k;
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        if (!get(out, path)) set(out, path, {});
+        rec(v, path);
+      } else {
+        set(out, path, v);
+      }
+    }
+  })(newF);
+  return out;
+}
 
 // Helper functions - simplified to let LLM handle intent detection
-function nearestCourt(place=""){
-  const s = (place||"").toLowerCase();
+function nearestCourt(place = "") {
+  const s = (place || "").toLowerCase();
   const map = [
     [/den haag|wassenaar|leiden|delft|zoetermeer|scheveningen|voorburg/, "Rechtbank Den Haag"],
     [/amsterdam|amstelveen|diemen|zaandam|hoofddorp|haarlem/, "Rechtbank Amsterdam / Noord-Holland"],
@@ -91,19 +121,22 @@ function nearestCourt(place=""){
     [/groningen|assen|leeuwarden/, "Rechtbank Noord-Nederland"],
     [/zwolle|enschede|deventer|almelo/, "Rechtbank Overijssel"],
     [/arnhem|nijmegen|apeldoorn|zutphen|ede|wageningen/, "Rechtbank Gelderland"],
-    [/maastricht|heerlen|sittard|venlo|roermond/, "Rechtbank Limburg"]
+    [/maastricht|heerlen|sittard|venlo|roermond/, "Rechtbank Limburg"],
   ];
-  for (const [rx,c] of map) if (rx.test(s)) return c;
+  for (const [rx, c] of map) if (rx.test(s)) return c;
   return "Rechtbank Den Haag";
 }
 
 const REQUIRED = [
-  "koper.naam","verkoper.naam",
-  "object.omschrijving","prijs.bedrag",
-  "levering.datum","levering.plaats"
+  "koper.naam",
+  "verkoper.naam",
+  "object.omschrijving",
+  "prijs.bedrag",
+  "levering.datum",
+  "levering.plaats",
 ];
 
-const missingKeys = f => REQUIRED.filter(k => !get(f,k));
+const missingKeys = (f) => REQUIRED.filter((k) => !get(f, k));
 
 // Data extraction from messages - keep basic regex extraction as fallback
 function extractFactsFromMessage(msg = "") {
@@ -124,75 +157,135 @@ function extractFactsFromMessage(msg = "") {
 }
 
 // Date and place extraction - simplified
-const NL_MONTHS = { jan:1,januari:1, feb:2,februari:2, mrt:3,maart:3, apr:4,april:4, mei:5, jun:6,juni:6, jul:7,juli:7, aug:8,augustus:8, sep:9,sept:9,september:9, okt:10,oktober:10, nov:11,november:11, dec:12,december:12 };
-const NL_DOW = { zondag:0, maandag:1, dinsdag:2, woensdag:3, donderdag:4, vrijdag:5, zaterdag:6 };
+const NL_MONTHS = {
+  jan: 1, januari: 1,
+  feb: 2, februari: 2,
+  mrt: 3, maart: 3,
+  apr: 4, april: 4,
+  mei: 5,
+  jun: 6, juni: 6,
+  jul: 7, juli: 7,
+  aug: 8, augustus: 8,
+  sep: 9, sept: 9, september: 9,
+  okt: 10, oktober: 10,
+  nov: 11, november: 11,
+  dec: 12, december: 12,
+};
+const NL_DOW = { zondag: 0, maandag: 1, dinsdag: 2, woensdag: 3, donderdag: 4, vrijdag: 5, zaterdag: 6 };
 
-function startOfISOWeek(dt){ const d=new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()); const dow=d.getDay()||7; if(dow!==1) d.setDate(d.getDate()-(dow-1)); d.setHours(0,0,0,0); return d; }
-function dayFromISOWeek(monday, dow){ const i=(dow===0?7:dow)-1; const d=new Date(monday); d.setDate(monday.getDate()+i); return d; }
+function startOfISOWeek(dt) {
+  const d = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+  const dow = d.getDay() || 7;
+  if (dow !== 1) d.setDate(d.getDate() - (dow - 1));
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+function dayFromISOWeek(monday, dow) {
+  const i = (dow === 0 ? 7 : dow) - 1;
+  const d = new Date(monday);
+  d.setDate(monday.getDate() + i);
+  return d;
+}
 const PLACE_RE = /\b(levering|afhalen|bezorging|overdracht|overhandiging)\b[^.]*?\b(in|te|op)\s+([A-ZÀ-ÖØ-Ý][\w'À-ÖØ-öø-ÿ -]{2,})(?=[,.)]|$)/i;
-const HOME_RE  = /\b(ik\s+woon|woonplaats\s*(is)?|mijn\s*woonplaats\s*(is)?)\b[^.]*?\b(in|te)\s+([A-ZÀ-ÖØ-Ý][\w'À-ÖØ-öø-ÿ -]{2,})(?=[,.)]|$)/i;
-const IN_RE    = /\b(in|te)\s+([A-ZÀ-ÖØ-Ý][\w'À-ÖØ-öø-ÿ -]{2,})(?=[,.)]|$)/g;
+const HOME_RE = /\b(ik\s+woon|woonplaats\s*(is)?|mijn\s*woonplaats\s*(is)?)\b[^.]*?\b(in|te)\s+([A-ZÀ-ÖØ-Ý][\w'À-ÖØ-öø-ÿ -]{2,})(?=[,.)]|$)/i;
+const IN_RE = /\b(in|te)\s+([A-ZÀ-ÖØ-Ý][\w'À-ÖØ-öø-ÿ -]{2,})(?=[,.)]|$)/g;
 
-function toISODate(d){ const z=n=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`; }
-function nextDow(from, dow){ const d=new Date(from); const delta=(dow-d.getDay()+7)%7||7; d.setDate(d.getDate()+delta); return d; }
+function toISODate(d) {
+  const z = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
+}
+function nextDow(from, dow) {
+  const d = new Date(from);
+  const delta = ((dow - d.getDay() + 7) % 7) || 7;
+  d.setDate(d.getDate() + delta);
+  return d;
+}
 
-function parseDateNL(msg, now=new Date()){
+function parseDateNL(msg, now = new Date()) {
   const s = msg.toLowerCase().normalize("NFKD");
   if (/\bvandaag\b/.test(s)) return toISODate(now);
-  if (/\bmorgen\b/.test(s)) { const d=new Date(now); d.setDate(d.getDate()+1); return toISODate(d); }
-  if (/\bovermorgen\b/.test(s)) { const d=new Date(now); d.setDate(d.getDate()+2); return toISODate(d); }
-  
-  let mDow = s.match(/\b(aanstaande|komende|volgende)\s+(zondag|maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag)\b/);
-  if (mDow) { const d = nextDow(now, NL_DOW[mDow[2]]); return toISODate(d); }
-  
-  mDow = s.match(/\b(volgende|deze)\s+week\s+(zondag|maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag)\b/);
-  if (mDow) {
-    const part = mDow[1]; const dowWord = mDow[2];
-    let monday = startOfISOWeek(now);
-    if (part === "volgende") monday.setDate(monday.getDate()+7);
-    const d = dayFromISOWeek(monday, NL_DOW[dowWord]);
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    if (part === "deze" && d < today) d.setDate(d.getDate()+7);
+  if (/\bmorgen\b/.test(s)) {
+    const d = new Date(now);
+    d.setDate(d.getDate() + 1);
     return toISODate(d);
   }
-  
-  let m = s.match(/\b(20\d{2}|19\d{2})[./-](\d{1,2})[./-](\d{1,2})\b/);
-  if (m) { const d = new Date(Number(m[1]), Number(m[2])-1, Number(m[3])); if(!isNaN(d)) return toISODate(d); }
-  
-  m = s.match(/\b(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\b/);
-  if (m) { let y=Number(m[3]); if (y<100) y+=2000; const d=new Date(y, Number(m[2])-1, Number(m[1])); if(!isNaN(d)) return toISODate(d); }
-  
-  m = s.match(/\b(\d{1,2})\s+([a-z.]+)\s*(\d{2,4})?\b/);
-  if (m && NL_MONTHS[m[2].replace(".","")]) { 
-    let y=m[3]?Number(m[3]):now.getFullYear(); 
-    if (y<100) y+=2000; 
-    const d=new Date(y, NL_MONTHS[m[2].replace(".","")]-1, Number(m[1])); 
-    if(!m[3] && d<now) d.setFullYear(d.getFullYear()+1); 
-    if(!isNaN(d)) return toISODate(d); 
+  if (/\bovermorgen\b/.test(s)) {
+    const d = new Date(now);
+    d.setDate(d.getDate() + 2);
+    return toISODate(d);
   }
-  
+
+  let mDow = s.match(/\b(aanstaande|komende|volgende)\s+(zondag|maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag)\b/);
+  if (mDow) {
+    const d = nextDow(now, NL_DOW[mDow[2]]);
+    return toISODate(d);
+  }
+
+  mDow = s.match(/\b(volgende|deze)\s+week\s+(zondag|maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag)\b/);
+  if (mDow) {
+    const part = mDow[1];
+    const dowWord = mDow[2];
+    let monday = startOfISOWeek(now);
+    if (part === "volgende") monday.setDate(monday.getDate() + 7);
+    const d = dayFromISOWeek(monday, NL_DOW[dowWord]);
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if (part === "deze" && d < today) d.setDate(d.getDate() + 7);
+    return toISODate(d);
+  }
+
+  let m = s.match(/\b(20\d{2}|19\d{2})[./-](\d{1,2})[./-](\d{1,2})\b/);
+  if (m) {
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    if (!isNaN(d)) return toISODate(d);
+  }
+
+  m = s.match(/\b(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\b/);
+  if (m) {
+    let y = Number(m[3]);
+    if (y < 100) y += 2000;
+    const d = new Date(y, Number(m[2]) - 1, Number(m[1]));
+    if (!isNaN(d)) return toISODate(d);
+  }
+
+  m = s.match(/\b(\d{1,2})\s+([a-z.]+)\s*(\d{2,4})?\b/);
+  if (m && NL_MONTHS[m[2].replace(".", "")]) {
+    let y = m[3] ? Number(m[3]) : now.getFullYear();
+    if (y < 100) y += 2000;
+    const d = new Date(y, NL_MONTHS[m[2].replace(".", "")] - 1, Number(m[1]));
+    if (!m[3] && d < now) d.setFullYear(d.getFullYear() + 1);
+    if (!isNaN(d)) return toISODate(d);
+  }
+
   m = s.match(/\b(\d{1,2})[./-](\d{1,2})\b/);
-  if (m) { 
-    const y0=now.getFullYear(); 
-    let d=new Date(y0, Number(m[2])-1, Number(m[1])); 
-    const today=new Date(now.getFullYear(), now.getMonth(), now.getDate()); 
-    if (d<today) d.setFullYear(y0+1); 
-    if(!isNaN(d)) return toISODate(d); 
+  if (m) {
+    const y0 = now.getFullYear();
+    let d = new Date(y0, Number(m[2]) - 1, Number(m[1]));
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if (d < today) d.setFullYear(y0 + 1);
+    if (!isNaN(d)) return toISODate(d);
   }
   return null;
 }
 
-function extractDatesPlaces(msg, now=new Date()){
+function extractDatesPlaces(msg, now = new Date()) {
   const out = {};
-  const iso = parseDateNL(msg, now); if (iso) out["levering.datum"] = iso;
-  let m = msg.match(PLACE_RE); if (m) out["levering.plaats"] = m[3].trim();
-  m = msg.match(HOME_RE); if (m) out["forum.woonplaats_gebruiker"] = m[5].trim();
-  if (!out["levering.plaats"]) { let last=null, r; while ((r=IN_RE.exec(msg))!==null) last=r[2]; if (last) out["levering.plaats"]=last.trim(); }
+  const iso = parseDateNL(msg, now);
+  if (iso) out["levering.datum"] = iso;
+  let m = msg.match(PLACE_RE);
+  if (m) out["levering.plaats"] = m[3].trim();
+  m = msg.match(HOME_RE);
+  if (m) out["forum.woonplaats_gebruiker"] = m[5].trim();
+  if (!out["levering.plaats"]) {
+    let last = null,
+      r;
+    while ((r = IN_RE.exec(msg)) !== null) last = r[2];
+    if (last) out["levering.plaats"] = last.trim();
+  }
   return out;
 }
 
 // Category detection and suggestions - keep for clause suggestions
-function detectCategory(facts){
+function detectCategory(facts) {
   const s = (facts?.object?.omschrijving || "").toLowerCase();
   if (/fiets|e-bike|racefiets|mtb|bakfiets|mountainbike/.test(s)) return "fiets";
   if (/laptop|notebook|macbook|computer|pc/.test(s)) return "laptop";
@@ -202,15 +295,16 @@ function detectCategory(facts){
   return "overig";
 }
 
-function deriveFlags(facts, lastUserMsg=""){
+function deriveFlags(facts, lastUserMsg = "") {
   const price = Number(facts?.prijs?.bedrag || 0);
-  const shipping = /verzend|bezorg|opsturen|pakket|postnl|dhl/i.test(lastUserMsg)
-                 || /bezorg|aflever/i.test(facts?.levering?.plaats || "");
+  const shipping =
+    /verzend|bezorg|opsturen|pakket|postnl|dhl/i.test(lastUserMsg) ||
+    /bezorg|aflever/i.test(facts?.levering?.plaats || "");
   const payInParts = /termijn|in delen|gespreid|betaling in delen/i.test(lastUserMsg);
   return { price, shipping, payInParts };
 }
 
-function fillTemplate(tpl, facts, vars={}) {
+function fillTemplate(tpl, facts, vars = {}) {
   return tpl.replace(/\{\{([^}|]+)(?:\|([^}]*))?\}\}/g, (_, path, fb) => {
     const v = get(facts, path.trim());
     if (v != null && String(v).trim() !== "") return String(v);
@@ -220,12 +314,12 @@ function fillTemplate(tpl, facts, vars={}) {
 }
 
 // Updated to fetch clauses dynamically
-async function pickCatalogSuggestions(facts, lastUserMsg="") {
+async function pickCatalogSuggestions(facts, lastUserMsg = "") {
   const agreementType = facts.agreement_type || "purchase";
   const catalog = await loadCatalog(agreementType);
   const cat = detectCategory(facts);
   const { price, shipping, payInParts } = deriveFlags(facts, lastUserMsg);
-  const matches = catalog.filter(it => {
+  const matches = catalog.filter((it) => {
     const w = it.when || {};
     if (w.category && !w.category.includes(cat)) return false;
     if (w.min_price && price < w.min_price) return false;
@@ -233,26 +327,26 @@ async function pickCatalogSuggestions(facts, lastUserMsg="") {
     if (w.pay_in_parts === true && !payInParts) return false;
     return true;
   });
-  return matches.slice(0, 3).map(it => ({
+  return matches.slice(0, 3).map((it) => ({
     id: it.id,
     title: it.title,
     why: it.why,
-    clause: fillTemplate(it.clause, facts, it.vars || {})
+    clause: fillTemplate(it.clause || "", facts, it.vars || {}),
   }));
 }
 
-function parseSuggestionSelection(userMsg="", suggestions=[]){
+function parseSuggestionSelection(userMsg = "", suggestions = []) {
   const picks = new Set();
   const m = userMsg.match(/\bneem\b([^.]*)/i);
   if (m) {
-    const nums = (m[1].match(/\d+/g) || []).map(n => Number(n)-1);
-    nums.forEach(ix => suggestions[ix] && picks.add(suggestions[ix].id));
+    const nums = (m[1].match(/\d+/g) || []).map((n) => Number(n) - 1);
+    nums.forEach((ix) => suggestions[ix] && picks.add(suggestions[ix].id));
   }
-  suggestions.forEach(s => {
-    const kw = (s.id || s.title).split(/\W+/)[0];
-    if (new RegExp(kw,"i").test(userMsg)) picks.add(s.id);
+  suggestions.forEach((s) => {
+    const kw = (s.id || s.title || "").split(/\W+/)[0];
+    if (kw && new RegExp(kw, "i").test(userMsg)) picks.add(s.id);
   });
-  return suggestions.filter(s => picks.has(s.id));
+  return suggestions.filter((s) => picks.has(s.id));
 }
 
 // IMPROVED LLM System prompt - let it handle all decision making
@@ -301,32 +395,39 @@ OUTPUT (STRICT JSON):
 {"say": string, "facts": object, "ask": string|null, "suggestions": [], "concept": null, "done": boolean, "intent":"contract"|"general"|"other", "should_draft": boolean}
 `;
 
-async function callLLM({facts, history, message}) {
+async function callLLM({ facts, history, message }) {
   const messages = [
-    { role:"system", content: SYSTEM_PROMPT },
+    { role: "system", content: SYSTEM_PROMPT },
     ...(history || []).slice(-8),
-    { role:"user", content: JSON.stringify({ message, facts }) }
+    { role: "user", content: JSON.stringify({ message, facts }) },
   ];
 
   const resp = await openai.chat.completions.create({
     model: process.env.OPENAI_MODEL || "gpt-4o",
     temperature: 0.3,
     messages,
-    response_format: { type: "json_object" }
+    response_format: { type: "json_object" },
   });
 
   const raw = resp.choices?.[0]?.message?.content || "{}";
-  try { return JSON.parse(raw); }
-  catch {
-    return { say:"Sorry, ik kon dit niet goed verwerken.", facts, ask:"Wil je het anders formuleren?", suggestions:[], concept:null, done:false, should_draft: false };
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {
+      say: "Sorry, ik kon dit niet goed verwerken.",
+      facts,
+      ask: "Wil je het anders formuleren?",
+      suggestions: [],
+      concept: null,
+      done: false,
+      should_draft: false,
+    };
   }
 }
 
 // Simplified response normalization
 function normalizeSayAsk(llm) {
   if (!llm) return;
-
-  // If ask is set, append to say (but avoid duplication)
   if (llm.ask && llm.ask.trim()) {
     const q = llm.ask.trim().replace(/\s*\?+$/, "?");
     const alreadyHas = (llm.say || "").includes(q);
@@ -338,11 +439,40 @@ function normalizeSayAsk(llm) {
   }
 }
 
-// Fetch template from GitHub
+// Fetch template from GitHub (robust)
 async function fetchTemplate(agreementType) {
   const url = `https://raw.githubusercontent.com/your-username/joopjurist/main/templates/${agreementType}.md`;
-  const response = await fetch(url);
-  return await response.text();
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      // Minimal fallback template to avoid crashes during 404s
+      return `# Koopovereenkomst
+
+**Koper:** {{koper.naam|${PH}}}  
+**Verkoper:** {{verkoper.naam|${PH}}}  
+
+**Object:** {{object.omschrijving|${PH}}}  
+**Prijs:** € {{prijs.bedrag|${PH}}}  
+
+**Levering:** {{levering.datum|${PH}}} te {{levering.plaats|${PH}}}
+
+_Toepasselijk recht: Nederlands recht. Forum: {{forum.rechtbank|${PH}}}._`;
+    }
+    return await response.text();
+  } catch {
+    // Network fail → same fallback
+    return `# Koopovereenkomst
+
+**Koper:** {{koper.naam|${PH}}}  
+**Verkoper:** {{verkoper.naam|${PH}}}  
+
+**Object:** {{object.omschrijving|${PH}}}  
+**Prijs:** € {{prijs.bedrag|${PH}}}  
+
+**Levering:** {{levering.datum|${PH}}} te {{levering.plaats|${PH}}}
+
+_Toepasselijk recht: Nederlands recht. Forum: {{forum.rechtbank|${PH}}}._`;
+  }
 }
 
 // Updated renderConcept to use fetched templates
@@ -350,6 +480,7 @@ async function renderConcept(f, usePH) {
   const agreementType = f.agreement_type || "purchase_agreement";
   const template = await fetchTemplate(agreementType);
   return fillTemplate(template, f, { PH: "*[●nader aan te vullen●]*" });
+} // <-- MISSING BRACE WAS HERE
 
 // MAIN API HANDLER - Simplified to trust LLM decisions
 export default async function handler(req, res) {
@@ -359,13 +490,7 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Missing OPENAI_API_KEY" });
     }
 
-    const {
-      message = "",
-      facts: clientFacts = {},
-      history = [],
-      clientNow,
-      clientOffset
-    } = req.body || {};
+    const { message = "", facts: clientFacts = {}, history = [], clientNow, clientOffset } = req.body || {};
 
     // Handle client timezone
     let NOW = new Date();
@@ -377,91 +502,83 @@ export default async function handler(req, res) {
       }
     }
 
-    // Extract basic facts as fallback (LLM should handle most of this)
+    // Extract basic facts as fallback
     const extracted = extractFactsFromMessage(message);
     const extractedDP = extractDatesPlaces(message, NOW);
     const mappedDP = {};
     if (extractedDP["levering.datum"]) set(mappedDP, "levering.datum", extractedDP["levering.datum"]);
     if (extractedDP["levering.plaats"]) set(mappedDP, "levering.plaats", extractedDP["levering.plaats"]);
-    if (extractedDP["forum.woonplaats_gebruiker"]) set(mappedDP, "forum.woonplaats_gebruiker", extractedDP["forum.woonplaats_gebruiker"]);
+    if (extractedDP["forum.woonplaats_gebruiker"])
+      set(mappedDP, "forum.woonplaats_gebruiker", extractedDP["forum.woonplaats_gebruiker"]);
     const preFacts = mergeFacts(mergeFacts(clientFacts, extracted), mappedDP);
 
-    // Get LLM response - this is where all the intelligence happens
+    // Get LLM response
     const llm = await callLLM({ facts: preFacts, history, message });
     normalizeSayAsk(llm);
 
-    // NEW: Load suggestions asynchronously
-    const canSuggest = !!get(facts, "object.omschrijving") && get(facts, "prijs.bedrag") != null;
-    if (canSuggest && llm.intent === "contract") {
-    suggestions = await pickCatalogSuggestions(facts, message);
-    }
-    
-    // Merge all facts
+    // ---- IMPORTANT: Merge LLM facts BEFORE any use ----
     let facts = mergeFacts(preFacts, llm.facts || {});
     set(facts, "recht.toepasselijk", "Nederlands recht");
 
-    // Set court based on user location if we have it
     if (get(facts, "forum.woonplaats_gebruiker") && !get(facts, "forum.rechtbank")) {
       set(facts, "forum.rechtbank", nearestCourt(get(facts, "forum.woonplaats_gebruiker")));
     }
 
-    // SIMPLIFIED: Trust the LLM's should_draft decision completely
-    const missing = missingKeys(facts);
+    // Suggestions (declare once)
+    let suggestions = [];
     let concept = null;
     let done = false;
 
+    let canSuggest =
+      !!get(facts, "object.omschrijving") && get(facts, "prijs.bedrag") != null;
+
+    if (canSuggest && llm.intent === "contract") {
+      suggestions = await pickCatalogSuggestions(facts, message);
+    }
+
     // Generate contract if LLM says so
+    const missing = missingKeys(facts);
     if (llm.should_draft) {
       const usePlaceholders = missing.length > 0;
       concept = await renderConcept(facts, usePlaceholders);
-      done = !usePlaceholders; // only "done" if no missing data
-      
-      // Handle suggestions for additional clauses
-      const canSuggest = !!get(facts, "object.omschrijving") && get(facts, "prijs.bedrag") != null;
-      if (canSuggest) {
-        suggestions = await pickCatalogSuggestions(facts, message);
-        
-        // Handle suggestion selections
+      done = !usePlaceholders;
+
+      if (canSuggest && suggestions.length) {
         const picked = parseSuggestionSelection(message, suggestions);
         if (picked.length && concept) {
-          const extra = picked.map(s => `\n**Aanvullende bepaling – ${s.title}**\n${s.clause}\n`).join("");
+          const extra = picked
+            .map((s) => `\n**Aanvullende bepaling – ${s.title}**\n${s.clause}\n`)
+            .join("");
           concept += `\n${extra}`;
         }
-      }
-    } else {
-      // Not generating contract - might still show suggestions for future use
-      const canSuggest = !!get(facts, "object.omschrijving") && get(facts, "prijs.bedrag") != null;
-      if (canSuggest && llm.intent === "contract") {
-        suggestions = await pickCatalogSuggestions(facts, message);
       }
     }
 
     // Debug logging (remove in production)
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('Decision factors:', {
-        message: message.slice(0, 50) + '...',
+    if (process.env.NODE_ENV !== "production") {
+      console.log("Decision factors:", {
+        message: message.slice(0, 50) + "...",
         llm_should_draft: llm.should_draft,
         missing_count: missing.length,
         intent: llm.intent,
-        generating_concept: !!concept
+        generating_concept: !!concept,
       });
     }
 
     return res.status(200).json({
       say: llm.say || "Helder.",
       facts,
-      ask: llm.ask || null,
+      ask: null,
       suggestions,
       concept,
       done,
-      downloadUrl: concept ? '/api/download-contract' : null  
+      downloadUrl: concept ? "/api/download-contract" : null,
     });
-
   } catch (err) {
     console.error("api/chat error:", err);
     return res.status(500).json({
       error: "Server error",
-      details: err?.message || String(err)
+      details: err?.message || String(err),
     });
   }
 }
