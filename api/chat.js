@@ -499,7 +499,7 @@ async function renderConcept(f, usePH) {
   const agreementType = f.agreement_type || "purchase";
   const template = await fetchTemplate(agreementType);
   return fillTemplate(template, f, { PH: "*[●nader aan te vullen●]*" });
-} HERE
+} 
 
 // MAIN API HANDLER - Simplified to trust LLM decisions
 export default async function handler(req, res) {
