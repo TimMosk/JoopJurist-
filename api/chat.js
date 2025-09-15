@@ -9,7 +9,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // Fetch clauses from GitHub (robust)
 async function loadCatalog(agreementType = "purchase") {
-  const url = `https://raw.githubusercontent.com/your-username/joopjurist/main/clauses/${agreementType}.yaml`;
+  const url = `https://raw.githubusercontent.com/TimMosk/JoopJurist-/main/clauses/${agreementType}.yaml`;
   try {
     const response = await fetch(url);
     if (!response.ok) return []; // fail soft
@@ -441,7 +441,7 @@ function normalizeSayAsk(llm) {
 
 // Fetch template from GitHub (robust)
 async function fetchTemplate(agreementType) {
-  const url = `https://raw.githubusercontent.com/your-username/joopjurist/main/templates/${agreementType}.md`;
+  const url = `https://raw.githubusercontent.com/TimMosk/JoopJurist-/main/templates/${agreementType}.md`;
   try {
     const response = await fetch(url);
     if (!response.ok) {
