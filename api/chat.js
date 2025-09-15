@@ -396,32 +396,51 @@ OUTPUT (STRICT JSON):
 `;
 
 async function callLLM({ facts, history, message }) {
+  console.log("callLLM starting with:", { 
+    message: message.slice(0, 50) + "...", 
+    factsKeys: Object.keys(facts),
+    historyLength: history?.length || 0
+  });
+
   const messages = [
     { role: "system", content: SYSTEM_PROMPT },
     ...(history || []).slice(-8),
     { role: "user", content: JSON.stringify({ message, facts }) },
   ];
 
-  const resp = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || "gpt-4o",
-    temperature: 0.3,
-    messages,
-    response_format: { type: "json_object" },
-  });
-
-  const raw = resp.choices?.[0]?.message?.content || "{}";
   try {
-    return JSON.parse(raw);
-  } catch {
-    return {
-      say: "Sorry, ik kon dit niet goed verwerken.",
-      facts,
-      ask: "Wil je het anders formuleren?",
-      suggestions: [],
-      concept: null,
-      done: false,
-      should_draft: false,
-    };
+    console.log("Making OpenAI API call...");
+    const resp = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || "gpt-4o",
+      temperature: 0.3,
+      messages,
+      response_format: { type: "json_object" },
+    });
+
+    console.log("OpenAI API call successful");
+    const raw = resp.choices?.[0]?.message?.content || "{}";
+    console.log("OpenAI response length:", raw.length);
+    
+    try {
+      const parsed = JSON.parse(raw);
+      console.log("JSON parsing successful");
+      return parsed;
+    } catch (parseError) {
+      console.error("JSON parsing failed:", parseError);
+      console.error("Raw response:", raw.slice(0, 200) + "...");
+      return {
+        say: "Sorry, ik kon dit niet goed verwerken.",
+        facts,
+        ask: "Wil je het anders formuleren?",
+        suggestions: [],
+        concept: null,
+        done: false,
+        should_draft: false,
+      };
+    }
+  } catch (apiError) {
+    console.error("OpenAI API call failed:", apiError);
+    throw apiError; // Re-throw to be caught by main handler
   }
 }
 
@@ -484,11 +503,22 @@ async function renderConcept(f, usePH) {
 
 // MAIN API HANDLER - Simplified to trust LLM decisions
 export default async function handler(req, res) {
+  console.log("Handler starting. Method:", req.method);
+  console.log("OpenAI API Key present:", !!process.env.OPENAI_API_KEY);
+  console.log("OpenAI Model:", process.env.OPENAI_MODEL || "gpt-4o (default)");
+  
   try {
-    if (req.method !== "POST") return res.status(405).json({ error: "Use POST" });
+    if (req.method !== "POST") {
+      console.log("Method not POST, returning 405");
+      return res.status(405).json({ error: "Use POST" });
+    }
+    
     if (!process.env.OPENAI_API_KEY) {
+      console.log("Missing OpenAI API key");
       return res.status(500).json({ error: "Missing OPENAI_API_KEY" });
     }
+
+    console.log("Request body keys:", Object.keys(req.body || {}));
 
     const { message = "", facts: clientFacts = {}, history = [], clientNow, clientOffset } = req.body || {};
 
