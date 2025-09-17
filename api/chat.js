@@ -1,4 +1,4 @@
-// /api/chat.js — JoopJurist backend (Vercel/Node serverless)
+// /api/chat.js — JoopJurist backend (Vercel/Node serverless) - COMPLETE FIXED VERSION
 
 // 0) Runtime MOET bovenaan
 export const config = { runtime: "nodejs" };
@@ -48,6 +48,17 @@ async function loadCatalog(agreementType = "purchase") {
               .split(",")
               .map((c) => c.trim().replace(/"/g, ""));
             currentClause.when.category = categories;
+          }
+        }
+        // NEW: Handle agreement_type
+        const agreementTypeLine = lines.find((l) => l.includes("agreement_type:"));
+        if (agreementTypeLine) {
+          const m = agreementTypeLine.match(/\[(.*?)\]/);
+          if (m) {
+            const types = m[1]
+              .split(",")
+              .map((c) => c.trim().replace(/"/g, ""));
+            currentClause.when.agreement_type = types;
           }
         }
         const priceLine = lines.find((l) => l.includes("min_price:"));
@@ -127,49 +138,106 @@ function nearestCourt(place = "") {
   return "Rechtbank Den Haag";
 }
 
-const REQUIRED = [
-  "koper.naam",
-  "verkoper.naam",
-  "object.omschrijving",
-  "prijs.bedrag",
-  "levering.datum",
-  "levering.plaats",
-];
+// NEW: Agreement type detection from user message
+function detectAgreementType(message) {
+  const msg = message.toLowerCase().normalize("NFKD");
+  
+  // NDA/Confidentiality indicators
+  if (/\b(nda|geheimhouding|vertrouwelijk|confidential|non.?disclosure|geheim)\b/.test(msg)) {
+    return "nda";
+  }
+  
+  // Purchase/Sale indicators  
+  if (/\b(koop|verkoop|purchase|buy|sell|aankoop|verkopen|kopen)\b/.test(msg)) {
+    return "purchase";
+  }
+  
+  // Let LLM decide for ambiguous cases
+  return null;
+}
 
-const missingKeys = (f) => REQUIRED.filter((k) => !get(f, k));
+// UPDATED: Required fields based on agreement type
+function getRequiredFields(agreementType) {
+  switch (agreementType) {
+    case "nda":
+      return [
+        "partij_a.naam",
+        "partij_b.naam", 
+        "doel",
+        "duur"
+      ];
+    case "purchase":
+      return [
+        "koper.naam",
+        "verkoper.naam",
+        "object.omschrijving",
+        "prijs.bedrag",
+        "levering.datum",
+        "levering.plaats",
+      ];
+    default:
+      return ["partijen", "doel"]; // Generic requirements
+  }
+}
 
-// Data extraction from messages - keep basic regex extraction as fallback
-function extractFactsFromMessage(msg = "") {
+const missingKeys = (facts, agreementType = "purchase") => {
+  const required = getRequiredFields(agreementType);
+  return required.filter((k) => !get(facts, k));
+};
+
+// Data extraction from messages - ENHANCED for agreement types
+function extractFactsFromMessage(msg = "", currentAgreementType = null) {
   const f = {};
-  let m = msg.match(/\bkoper\b[^A-Za-z0-9]+(?:is|=|:)?\s*([A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ' -]{1,60})/i);
-  if (m) {
-    const name = m[1].trim().replace(/[.,;:]+$/, "");
-    if (!f.koper) f.koper = {};
-    f.koper.naam = name;
+  
+  // Detect agreement type if not already set
+  if (!currentAgreementType) {
+    const detectedType = detectAgreementType(msg);
+    if (detectedType) {
+      f.agreement_type = detectedType;
+    }
   }
-  m = msg.match(/\bverkoper\b[^A-Za-z0-9]+(?:is|=|:)?\s*([A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ' -]{1,60})/i);
+  
+  // Extract names (works for both koper/verkoper and partij_a/partij_b)
+  let m = msg.match(/\b(koper|partij\s*a)\b[^A-Za-z0-9]+(?:is|=|:)?\s*([A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ' -]{1,60})/i);
   if (m) {
-    const name = m[1].trim().replace(/[.,;:]+$/, "");
-    if (!f.verkoper) f.verkoper = {};
-    f.verkoper.naam = name;
+    const name = m[2].trim().replace(/[.,;:]+$/, "");
+    const isNDA = currentAgreementType === "nda" || f.agreement_type === "nda";
+    if (isNDA) {
+      if (!f.partij_a) f.partij_a = {};
+      f.partij_a.naam = name;
+    } else {
+      if (!f.koper) f.koper = {};
+      f.koper.naam = name;
+    }
   }
+  
+  m = msg.match(/\b(verkoper|partij\s*b)\b[^A-Za-z0-9]+(?:is|=|:)?\s*([A-ZÀ-ÖØ-Ý][\wÀ-ÖØ-öø-ÿ' -]{1,60})/i);
+  if (m) {
+    const name = m[2].trim().replace(/[.,;:]+$/, "");
+    const isNDA = currentAgreementType === "nda" || f.agreement_type === "nda";
+    if (isNDA) {
+      if (!f.partij_b) f.partij_b = {};
+      f.partij_b.naam = name;
+    } else {
+      if (!f.verkoper) f.verkoper = {};
+      f.verkoper.naam = name;
+    }
+  }
+  
+  // Extract purpose/goal for NDAs
+  m = msg.match(/\b(doel|purpose|voor)\b[^A-Za-z0-9]+(?:is|=|:)?\s*([^.]{10,100})/i);
+  if (m && (currentAgreementType === "nda" || f.agreement_type === "nda")) {
+    f.doel = m[2].trim().replace(/[.,;:]+$/, "");
+  }
+  
   return f;
 }
 
-// Date and place extraction - simplified
+// Keep existing date and place extraction functions (unchanged)
 const NL_MONTHS = {
-  jan: 1, januari: 1,
-  feb: 2, februari: 2,
-  mrt: 3, maart: 3,
-  apr: 4, april: 4,
-  mei: 5,
-  jun: 6, juni: 6,
-  jul: 7, juli: 7,
-  aug: 8, augustus: 8,
-  sep: 9, sept: 9, september: 9,
-  okt: 10, oktober: 10,
-  nov: 11, november: 11,
-  dec: 12, december: 12,
+  jan: 1, januari: 1, feb: 2, februari: 2, mrt: 3, maart: 3, apr: 4, april: 4, mei: 5,
+  jun: 6, juni: 6, jul: 7, juli: 7, aug: 8, augustus: 8, sep: 9, sept: 9, september: 9,
+  okt: 10, oktober: 10, nov: 11, november: 11, dec: 12, december: 12,
 };
 const NL_DOW = { zondag: 0, maandag: 1, dinsdag: 2, woensdag: 3, donderdag: 4, vrijdag: 5, zaterdag: 6 };
 
@@ -284,7 +352,7 @@ function extractDatesPlaces(msg, now = new Date()) {
   return out;
 }
 
-// Category detection and suggestions - keep for clause suggestions
+// Category detection and suggestions - updated for multiple agreement types
 function detectCategory(facts) {
   const s = (facts?.object?.omschrijving || "").toLowerCase();
   if (/fiets|e-bike|racefiets|mtb|bakfiets|mountainbike/.test(s)) return "fiets";
@@ -313,20 +381,26 @@ function fillTemplate(tpl, facts, vars = {}) {
   });
 }
 
-// Updated to fetch clauses dynamically
+// Updated to fetch clauses dynamically AND filter by agreement type
 async function pickCatalogSuggestions(facts, lastUserMsg = "") {
   const agreementType = facts.agreement_type || "purchase";
   const catalog = await loadCatalog(agreementType);
   const cat = detectCategory(facts);
   const { price, shipping, payInParts } = deriveFlags(facts, lastUserMsg);
+  
   const matches = catalog.filter((it) => {
     const w = it.when || {};
+    
+    // NEW: Filter by agreement type
+    if (w.agreement_type && !w.agreement_type.includes(agreementType)) return false;
+    
     if (w.category && !w.category.includes(cat)) return false;
     if (w.min_price && price < w.min_price) return false;
     if (w.shipping === true && !shipping) return false;
     if (w.pay_in_parts === true && !payInParts) return false;
     return true;
   });
+  
   return matches.slice(0, 3).map((it) => ({
     id: it.id,
     title: it.title,
@@ -349,9 +423,9 @@ function parseSuggestionSelection(userMsg = "", suggestions = []) {
   return suggestions.filter((s) => picks.has(s.id));
 }
 
-// IMPROVED LLM System prompt - let it handle all decision making
+// UPDATED LLM System prompt - now includes agreement type detection
 const SYSTEM_PROMPT = `
-Je bent "JoopJurist", een Nederlandse jurist met veel ervaring. Doel: help bij alle overeenkomsten waar ondernemers mee te maken krijgen naar Nederlands recht, waaronder een koopovereenkomst voor spullen (roerende zaak) en een NDA in natuurlijk Nederlands.
+Je bent "JoopJurist", een Nederlandse jurist met veel ervaring. Doel: help bij alle overeenkomsten waar ondernemers mee te maken krijgen naar Nederlands recht, waaronder koopovereenkomsten en NDA's.
 
 STIJL:
 - Eén antwoord per beurt. "say" = je boodschap; "ask" = eventuele vraag (max 1). Geen dubbele vragen.
@@ -361,9 +435,16 @@ JURIDISCH:
 - Toepasselijk recht = Nederlands recht.
 - Forumkeuze = dichtstbijzijnde rechtbank bij woonplaats van gebruiker.
 
+OVEREENKOMST TYPES:
+- Bepaal "agreement_type" ∈ {"purchase", "nda", "other"}
+- "purchase" = koopovereenkomst voor roerende zaken 
+- "nda" = geheimhoudingsovereenkomst/vertrouwelijkheidsafspraak
+- "other" = andere overeenkomsten die we nog niet gemodelleerd hebben
+- Zet ALTIJD facts.agreement_type op de juiste waarde
+
 BESLISSINGEN:
 - Bepaal "intent" ∈ {"contract","general","other"}.
-- "contract" = gebruiker wil een koopovereenkomst opstellen/aanpassen/afronden.
+- "contract" = gebruiker wil een overeenkomst opstellen/aanpassen/afronden.
 - "general" = algemene vraag/advies.
 - "other" = niet te plaatsen/overig.
 
@@ -380,15 +461,41 @@ Zet "should_draft" op FALSE bij:
 - Onduidelijke intentie
 - Gebruiker wil nog niet het concept
 
-FACTS-SCHEMA (exact deze paden):
-facts = {
-  "koper":   { "naam": string|null, "adres": string|null },
-  "verkoper":{ "naam": string|null, "adres": string|null },
-  "object":  { "omschrijving": string|null, "conditie": string|null, "identifiers": string|null },
-  "prijs":   { "bedrag": number|null },
-  "levering":{ "datum": string|null, "plaats": string|null },
-  "forum":   { "woonplaats_gebruiker": string|null, "rechtbank": string|null },
-  "recht":   { "toepasselijk": "Nederlands recht" }
+FACTS-SCHEMA PER TYPE:
+
+Voor PURCHASE (koopovereenkomsten):
+{
+  "agreement_type": "purchase",
+  "koper": { "naam": string|null, "adres": string|null },
+  "verkoper": { "naam": string|null, "adres": string|null },
+  "object": { "omschrijving": string|null, "conditie": string|null, "identifiers": string|null },
+  "prijs": { "bedrag": number|null },
+  "levering": { "datum": string|null, "plaats": string|null },
+  "forum": { "woonplaats_gebruiker": string|null, "rechtbank": string|null },
+  "recht": { "toepasselijk": "Nederlands recht" }
+}
+
+Voor NDA (geheimhoudingsovereenkomsten):
+{
+  "agreement_type": "nda",
+  "partij_a": { "naam": string|null, "adres": string|null },
+  "partij_b": { "naam": string|null, "adres": string|null },
+  "doel": string|null,
+  "duur": string|null,
+  "geheimhouding_clause": string|null,
+  "boete_clause": string|null,
+  "forum": { "woonplaats_gebruiker": string|null, "rechtbank": string|null },
+  "recht": { "toepasselijk": "Nederlands recht" }
+}
+
+Voor OTHER (andere overeenkomsten):
+{
+  "agreement_type": "other",
+  "partijen": string|null,
+  "doel": string|null,
+  "details": string|null,
+  "forum": { "woonplaats_gebruiker": string|null, "rechtbank": string|null },
+  "recht": { "toepasselijk": "Nederlands recht" }
 }
 
 OUTPUT (STRICT JSON):
@@ -399,7 +506,8 @@ async function callLLM({ facts, history, message }) {
   console.log("callLLM starting with:", { 
     message: message.slice(0, 50) + "...", 
     factsKeys: Object.keys(facts),
-    historyLength: history?.length || 0
+    historyLength: history?.length || 0,
+    currentAgreementType: facts.agreement_type
   });
 
   const messages = [
@@ -423,7 +531,7 @@ async function callLLM({ facts, history, message }) {
     
     try {
       const parsed = JSON.parse(raw);
-      console.log("JSON parsing successful");
+      console.log("JSON parsing successful, agreement_type:", parsed.facts?.agreement_type);
       return parsed;
     } catch (parseError) {
       console.error("JSON parsing failed:", parseError);
@@ -458,13 +566,51 @@ function normalizeSayAsk(llm) {
   }
 }
 
-// Fetch template from GitHub (robust)
+// Fetch template from GitHub (robust) - UPDATED for multiple agreement types
 async function fetchTemplate(agreementType) {
   const url = `https://raw.githubusercontent.com/TimMosk/JoopJurist-/main/templates/${agreementType}.md`;
   try {
     const response = await fetch(url);
     if (!response.ok) {
-      // Minimal fallback template to avoid crashes during 404s
+      // Fallback templates based on agreement type
+      return getFallbackTemplate(agreementType);
+    }
+    return await response.text();
+  } catch {
+    // Network fail → fallback
+    return getFallbackTemplate(agreementType);
+  }
+}
+
+// NEW: Fallback templates for different agreement types
+function getFallbackTemplate(agreementType) {
+  switch (agreementType) {
+    case "nda":
+      return `# GEHEIMHOUDINGSOVEREENKOMST
+
+**Partij A:** {{partij_a.naam|${PH}}}  
+**Partij B:** {{partij_b.naam|${PH}}}  
+
+**Doel:** {{doel|${PH}}}  
+
+## Geheimhoudingsplicht
+{{geheimhouding_clause|Partijen zullen alle vertrouwelijke informatie die zij van elkaar ontvangen strikt geheim houden en alleen gebruiken voor het doel van deze overeenkomst.}}
+
+## Duur
+Deze overeenkomst geldt voor een periode van {{duur|3 jaar}}.
+
+## Boetebeding  
+{{boete_clause|Bij schending van de geheimhoudingsplicht is een boete verschuldigd van €10.000 per schending.}}
+
+_Toepasselijk recht: Nederlands recht. Forum: {{forum.rechtbank|${PH}}}._
+
+Deze overeenkomst is ondertekend door:
+
+**Partij A:** {{partij_a.naam|${PH}}} Handtekening: _________________________ Datum: _________
+
+**Partij B:** {{partij_b.naam|${PH}}} Handtekening: _________________________ Datum: _________`;
+
+    case "purchase":
       return `# Koopovereenkomst
 
 **Koper:** {{koper.naam|${PH}}}  
@@ -476,32 +622,27 @@ async function fetchTemplate(agreementType) {
 **Levering:** {{levering.datum|${PH}}} te {{levering.plaats|${PH}}}
 
 _Toepasselijk recht: Nederlands recht. Forum: {{forum.rechtbank|${PH}}}._`;
-    }
-    return await response.text();
-  } catch {
-    // Network fail → same fallback
-    return `# Koopovereenkomst
 
-**Koper:** {{koper.naam|${PH}}}  
-**Verkoper:** {{verkoper.naam|${PH}}}  
+    default:
+      return `# Overeenkomst
 
-**Object:** {{object.omschrijving|${PH}}}  
-**Prijs:** € {{prijs.bedrag|${PH}}}  
+**Partijen:** {{partijen|${PH}}}  
+**Doel:** {{doel|${PH}}}  
 
-**Levering:** {{levering.datum|${PH}}} te {{levering.plaats|${PH}}}
+**Details:** {{details|${PH}}}  
 
 _Toepasselijk recht: Nederlands recht. Forum: {{forum.rechtbank|${PH}}}._`;
   }
 }
 
-// Updated renderConcept to use fetched templates
-async function renderConcept(f, usePH) {
-  const agreementType = f.agreement_type || "purchase";
+// Updated renderConcept to use agreement-type-aware templates
+async function renderConcept(facts) {
+  const agreementType = facts.agreement_type || "purchase";
   const template = await fetchTemplate(agreementType);
-  return fillTemplate(template, f, { PH: "*[●nader aan te vullen●]*" });
+  return fillTemplate(template, facts, { PH: "*[●nader aan te vullen●]*" });
 } 
 
-// MAIN API HANDLER - Simplified to trust LLM decisions
+// MAIN API HANDLER - Enhanced with agreement type support
 export default async function handler(req, res) {
   console.log("Handler starting. Method:", req.method);
   console.log("OpenAI API Key present:", !!process.env.OPENAI_API_KEY);
@@ -532,14 +673,16 @@ export default async function handler(req, res) {
       }
     }
 
-    // Extract basic facts as fallback
-    const extracted = extractFactsFromMessage(message);
+    // Extract basic facts with agreement type detection
+    const currentAgreementType = clientFacts.agreement_type;
+    const extracted = extractFactsFromMessage(message, currentAgreementType);
     const extractedDP = extractDatesPlaces(message, NOW);
     const mappedDP = {};
     if (extractedDP["levering.datum"]) set(mappedDP, "levering.datum", extractedDP["levering.datum"]);
     if (extractedDP["levering.plaats"]) set(mappedDP, "levering.plaats", extractedDP["levering.plaats"]);
     if (extractedDP["forum.woonplaats_gebruiker"])
       set(mappedDP, "forum.woonplaats_gebruiker", extractedDP["forum.woonplaats_gebruiker"]);
+    
     const preFacts = mergeFacts(mergeFacts(clientFacts, extracted), mappedDP);
 
     // Get LLM response
@@ -550,27 +693,44 @@ export default async function handler(req, res) {
     let facts = mergeFacts(preFacts, llm.facts || {});
     set(facts, "recht.toepasselijk", "Nederlands recht");
 
+    // Ensure agreement_type is set (fallback if LLM doesn't set it)
+    if (!facts.agreement_type) {
+      const detectedType = detectAgreementType(message);
+      facts.agreement_type = detectedType || "other";
+    }
+
+    console.log("Final agreement type:", facts.agreement_type);
+
     if (get(facts, "forum.woonplaats_gebruiker") && !get(facts, "forum.rechtbank")) {
       set(facts, "forum.rechtbank", nearestCourt(get(facts, "forum.woonplaats_gebruiker")));
     }
 
-    // Suggestions (declare once)
+    // Suggestions and concept generation
     let suggestions = [];
     let concept = null;
     let done = false;
 
-    let canSuggest =
-      !!get(facts, "object.omschrijving") && get(facts, "prijs.bedrag") != null;
+    // Check if we can suggest clauses (different logic per agreement type)
+    let canSuggest = false;
+    const agreementType = facts.agreement_type || "purchase";
+    
+    if (agreementType === "nda") {
+      canSuggest = !!get(facts, "partij_a.naam") && !!get(facts, "partij_b.naam");
+    } else if (agreementType === "purchase") {
+      canSuggest = !!get(facts, "object.omschrijving") && get(facts, "prijs.bedrag") != null;
+    } else {
+      canSuggest = !!get(facts, "partijen") || !!get(facts, "doel");
+    }
 
     if (canSuggest && llm.intent === "contract") {
       suggestions = await pickCatalogSuggestions(facts, message);
     }
 
     // Generate contract if LLM says so
-    const missing = missingKeys(facts);
+    const missing = missingKeys(facts, agreementType);
     if (llm.should_draft) {
       const usePlaceholders = missing.length > 0;
-      concept = await renderConcept(facts, usePlaceholders);
+      concept = await renderConcept(facts);
       done = !usePlaceholders;
 
       if (canSuggest && suggestions.length) {
@@ -584,12 +744,14 @@ export default async function handler(req, res) {
       }
     }
 
-    // Debug logging (remove in production)
+    // Debug logging
     if (process.env.NODE_ENV !== "production") {
       console.log("Decision factors:", {
         message: message.slice(0, 50) + "...",
+        agreement_type: facts.agreement_type,
         llm_should_draft: llm.should_draft,
         missing_count: missing.length,
+        missing_keys: missing,
         intent: llm.intent,
         generating_concept: !!concept,
       });
