@@ -568,15 +568,30 @@ function normalizeSayAsk(llm) {
 
 // Fetch template from GitHub (robust) - UPDATED for multiple agreement types
 async function fetchTemplate(agreementType) {
-  const url = `https://raw.githubusercontent.com/TimMosk/JoopJurist-/main/templates/${agreementType}.md`;
+  // Map agreement types to actual template filenames
+  const templateFileMap = {
+    "purchase": "purchase_agreement.md",
+    "nda": "nda.md",
+    "other": "other.md"
+  };
+  
+  const filename = templateFileMap[agreementType] || `${agreementType}.md`;
+  const url = `https://raw.githubusercontent.com/TimMosk/JoopJurist-/main/templates/${filename}`;
+  
+  console.log(`Fetching template: ${url}`);
+  
   try {
     const response = await fetch(url);
     if (!response.ok) {
+      console.log(`Template fetch failed: ${response.status} for ${url}`);
       // Fallback templates based on agreement type
       return getFallbackTemplate(agreementType);
     }
-    return await response.text();
-  } catch {
+    const template = await response.text();
+    console.log(`Successfully fetched template for ${agreementType}, length: ${template.length}`);
+    return template;
+  } catch (error) {
+    console.error(`Template fetch error for ${agreementType}:`, error);
     // Network fail → fallback
     return getFallbackTemplate(agreementType);
   }
